@@ -29,8 +29,8 @@
   let selfName = '';
   let roomId = getRoomIdFromUrl();
   let localStream = null;
-  let localTrackIds = new Set();
-  const peers = new Map(); // peerId -> { pc, name, polite, makingOffer, ignoreOffer }
+  // peerId -> { pc, name, polite, makingOffer, ignoreOffer, videoTransceiver, audioTransceiver, remoteStream }
+  const peers = new Map();
   const remoteTiles = new Map(); // peerId -> tile element
   const participantsState = new Map(); // peerId -> name
 
@@ -147,8 +147,6 @@
           } catch (err) {
             if (!peer.ignoreOffer) console.warn('ICE candidate error', err);
           }
-        } else if (data.stopShare) {
-          removeRemoteTile(from);
         }
       } catch (err) {
         console.warn('Erro de sinalizacao', err);
@@ -161,12 +159,30 @@
   }
 
   // ---------- WebRTC peer management ----------
+  // Os transceivers de video/audio sao criados de uma vez so, na hora que o
+  // peer eh conhecido, com direcao "sendrecv" fixa. Compartilhar/parar tela
+  // depois disso usa apenas replaceTrack (sem nova negociacao SDP), que eh
+  // muito mais confiavel entre navegadores/redes diferentes do que ficar
+  // adicionando/removendo tracks e renegociando toda vez.
   function ensurePeer(peerId, name) {
     if (peers.has(peerId)) return peers.get(peerId);
 
     const polite = selfId ? selfId < peerId : true;
     const pc = new RTCPeerConnection(RTC_CONFIG);
-    const peer = { pc, name, polite, makingOffer: false, ignoreOffer: false };
+
+    const videoTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+    const audioTransceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
+
+    const peer = {
+      pc,
+      name,
+      polite,
+      makingOffer: false,
+      ignoreOffer: false,
+      videoTransceiver,
+      audioTransceiver,
+      remoteStream: new MediaStream(),
+    };
     peers.set(peerId, peer);
 
     pc.onicecandidate = (e) => {
@@ -186,20 +202,22 @@
     };
 
     pc.ontrack = (e) => {
-      if (e.track.kind !== 'video') return;
-      showRemoteTile(peerId, e.streams[0]);
-      e.track.addEventListener('ended', () => removeRemoteTile(peerId));
-    };
+      peer.remoteStream.addTrack(e.track);
 
-    pc.onconnectionstatechange = () => {
-      if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
-        // conexao caiu; a lista de participantes via socket ainda manda a verdade
-      }
+      if (e.track.kind !== 'video') return;
+
+      const showIfActive = () => {
+        if (!e.track.muted) showRemoteTile(peerId, peer.remoteStream);
+      };
+      e.track.onunmute = showIfActive;
+      e.track.onmute = () => removeRemoteTile(peerId);
+      showIfActive();
     };
 
     // se eu ja estou compartilhando quando um novo peer entra, manda pra ele tambem
     if (localStream) {
-      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+      videoTransceiver.sender.replaceTrack(localStream.getVideoTracks()[0] || null);
+      audioTransceiver.sender.replaceTrack(localStream.getAudioTracks()[0] || null);
     }
 
     return peer;
@@ -230,12 +248,14 @@
       return;
     }
 
-    localTrackIds = new Set(localStream.getTracks().map((t) => t.id));
+    const videoTrack = localStream.getVideoTracks()[0] || null;
+    const audioTrack = localStream.getAudioTracks()[0] || null;
 
-    localStream.getVideoTracks()[0].addEventListener('ended', stopShare);
+    if (videoTrack) videoTrack.addEventListener('ended', stopShare);
 
     peers.forEach((peer) => {
-      localStream.getTracks().forEach((track) => peer.pc.addTrack(track, localStream));
+      peer.videoTransceiver.sender.replaceTrack(videoTrack);
+      peer.audioTransceiver.sender.replaceTrack(audioTrack);
     });
 
     showLocalTile(localStream);
@@ -248,16 +268,13 @@
   function stopShare() {
     if (!localStream) return;
 
-    peers.forEach((peer, peerId) => {
-      peer.pc.getSenders()
-        .filter((s) => s.track && localTrackIds.has(s.track.id))
-        .forEach((s) => peer.pc.removeTrack(s));
-      sendSignal(peerId, { stopShare: true });
+    peers.forEach((peer) => {
+      peer.videoTransceiver.sender.replaceTrack(null);
+      peer.audioTransceiver.sender.replaceTrack(null);
     });
 
     localStream.getTracks().forEach((t) => t.stop());
     localStream = null;
-    localTrackIds = new Set();
 
     removeRemoteTile('local');
 
