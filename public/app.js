@@ -166,6 +166,7 @@
   // adicionando/removendo tracks e renegociando toda vez.
   function ensurePeer(peerId, name) {
     if (peers.has(peerId)) return peers.get(peerId);
+    console.log(`[GOLBTELAS] Criando conexão com ${name} (${peerId})`);
 
     const polite = selfId ? selfId < peerId : true;
     const pc = new RTCPeerConnection(RTC_CONFIG);
@@ -189,6 +190,14 @@
       if (e.candidate) sendSignal(peerId, { candidate: e.candidate });
     };
 
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[GOLBTELAS][${name}] ICE:`, pc.iceConnectionState);
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log(`[GOLBTELAS][${name}] Conexão:`, pc.connectionState);
+    };
+
     pc.onnegotiationneeded = async () => {
       try {
         peer.makingOffer = true;
@@ -202,15 +211,20 @@
     };
 
     pc.ontrack = (e) => {
+      console.log(`[GOLBTELAS][${name}] ontrack recebido:`, e.track.kind, 'muted=', e.track.muted);
       peer.remoteStream.addTrack(e.track);
 
       if (e.track.kind !== 'video') return;
 
       const showIfActive = () => {
+        console.log(`[GOLBTELAS][${name}] video track unmute/state, muted=`, e.track.muted);
         if (!e.track.muted) showRemoteTile(peerId, peer.remoteStream);
       };
       e.track.onunmute = showIfActive;
-      e.track.onmute = () => removeRemoteTile(peerId);
+      e.track.onmute = () => {
+        console.log(`[GOLBTELAS][${name}] video track mute`);
+        removeRemoteTile(peerId);
+      };
       showIfActive();
     };
 
@@ -251,11 +265,17 @@
     const videoTrack = localStream.getVideoTracks()[0] || null;
     const audioTrack = localStream.getAudioTracks()[0] || null;
 
+    console.log('[GOLBTELAS] Iniciando compartilhamento. Peers conectados:', peers.size);
+
     if (videoTrack) videoTrack.addEventListener('ended', stopShare);
 
-    peers.forEach((peer) => {
-      peer.videoTransceiver.sender.replaceTrack(videoTrack);
-      peer.audioTransceiver.sender.replaceTrack(audioTrack);
+    peers.forEach((peer, peerId) => {
+      console.log(`[GOLBTELAS] Enviando track pra ${peer.name} (${peerId})`);
+      peer.videoTransceiver.sender.replaceTrack(videoTrack)
+        .then(() => console.log(`[GOLBTELAS] replaceTrack video OK pra ${peer.name}`))
+        .catch((err) => console.error(`[GOLBTELAS] replaceTrack video FALHOU pra ${peer.name}`, err));
+      peer.audioTransceiver.sender.replaceTrack(audioTrack)
+        .catch((err) => console.error(`[GOLBTELAS] replaceTrack audio FALHOU pra ${peer.name}`, err));
     });
 
     showLocalTile(localStream);
