@@ -255,6 +255,29 @@ body {
   background: var(--live);
 }
 
+.mute-toggle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(14,16,22,0.75);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mute-toggle:hover { border-color: var(--accent); }
+
+.video-tile.is-self .video-tile-label {
+  background: rgba(232,184,75,0.18);
+  border: 1px solid var(--accent-dim);
+}
+
 /* Side panel */
 .side-panel {
   display: flex;

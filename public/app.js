@@ -1,6 +1,26 @@
 (() => {
   const RTC_CONFIG = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      // TURN publico de teste (rate-limited) - garante conexao mesmo quando
+      // as duas pessoas estao atras de NAT/CGNAT restritivo (comum em rede
+      // de operadora de celular). Para uso pesado, troque por um TURN proprio.
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ],
   };
 
   // ---------- estado ----------
@@ -73,6 +93,7 @@
 
     socket.on('joined', ({ selfId: id, existingPeers }) => {
       selfId = id;
+      participantsState.set(selfId, selfName);
       joinView.classList.add('hidden');
       roomView.classList.remove('hidden');
 
@@ -217,6 +238,8 @@
       localStream.getTracks().forEach((track) => peer.pc.addTrack(track, localStream));
     });
 
+    showLocalTile(localStream);
+
     shareBtn.classList.add('hidden');
     stopShareBtn.classList.remove('hidden');
     renderParticipants();
@@ -236,9 +259,32 @@
     localStream = null;
     localTrackIds = new Set();
 
+    removeRemoteTile('local');
+
     shareBtn.classList.remove('hidden');
     stopShareBtn.classList.add('hidden');
     renderParticipants();
+  }
+
+  // preview da sua propria tela compartilhada, pra confirmar que esta indo
+  function showLocalTile(stream) {
+    let tile = remoteTiles.get('local');
+    if (!tile) {
+      const frag = videoTileTemplate.content.cloneNode(true);
+      tile = frag.querySelector('.video-tile');
+      tile.dataset.peerId = 'local';
+      tile.classList.add('is-self');
+      tile.querySelector('.mute-toggle').remove(); // e sua propria tela, nao precisa de audio
+      stageGrid.appendChild(tile);
+      remoteTiles.set('local', tile);
+    }
+    const video = tile.querySelector('video');
+    video.muted = true; // evita eco da propria transmissao
+    if (video.srcObject !== stream) video.srcObject = stream;
+    tile.querySelector('.tile-name').textContent = `${selfName} (você)`;
+    attemptPlay(video);
+    updateStageEmptyState();
+    updateLiveCount();
   }
 
   // ---------- render: grade de video ----------
@@ -248,14 +294,36 @@
       const frag = videoTileTemplate.content.cloneNode(true);
       tile = frag.querySelector('.video-tile');
       tile.dataset.peerId = peerId;
+      const muteBtn = tile.querySelector('.mute-toggle');
+      muteBtn.addEventListener('click', () => {
+        const v = tile.querySelector('video');
+        v.muted = !v.muted;
+        muteBtn.textContent = v.muted ? '🔇' : '🔊';
+        if (!v.muted) attemptPlay(v);
+      });
       stageGrid.appendChild(tile);
       remoteTiles.set(peerId, tile);
     }
     const video = tile.querySelector('video');
     if (video.srcObject !== stream) video.srcObject = stream;
     tile.querySelector('.tile-name').textContent = participantsState.get(peerId) || 'Participante';
+    attemptPlay(video);
     updateStageEmptyState();
     updateLiveCount();
+  }
+
+  // navegadores bloqueiam autoplay de video com audio sem gesto do usuario -
+  // isso deixava a tela preta mesmo com a conexao funcionando. As tiles
+  // remotas comecam mutadas (autoplay confiavel) e o botao de som da tile
+  // desmuta com um clique, que conta como gesto do usuario.
+  function attemptPlay(video) {
+    const p = video.play();
+    if (p && p.catch) {
+      p.catch(() => {
+        video.muted = true;
+        video.play().catch(() => {});
+      });
+    }
   }
 
   function removeRemoteTile(peerId) {
@@ -280,7 +348,10 @@
   // ---------- render: lista de participantes ----------
   function renderParticipants() {
     participantList.innerHTML = '';
-    const all = [[selfId, selfName], ...Array.from(participantsState.entries())];
+    // participantsState ja inclui o proprio usuario (setado no evento 'joined'
+    // e reforcado a cada 'participants-update' vindo do servidor) - nao
+    // prepender de novo aqui, senao aparece duplicado.
+    const all = Array.from(participantsState.entries());
 
     all.forEach(([id, name]) => {
       if (!id) return;
