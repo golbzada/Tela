@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TelaJunto — transmissão de tela</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot" id="connDot"></span>
+    <span class="brand-word">TELAJUNTO</span>
+  </div>
+  <div class="topbar-right" id="topbarRight"></div>
+</header>
+
+<!-- TELA 1: entrar na sala -->
+<main id="joinView" class="view join-view">
+  <div class="join-card">
+    <p class="eyebrow">Sala de transmissão</p>
+    <h1>Entrar na sala</h1>
+    <p class="sub">Digite seu nome para continuar.</p>
+
+    <label class="field-label" for="nameInput">SEU NOME</label>
+    <input id="nameInput" class="field" type="text" placeholder="Digite seu nome" maxlength="40" autocomplete="off" />
+
+    <button id="joinBtn" class="btn-primary">Entrar</button>
+    <p class="hint">A câmera não é usada — só compartilhamento de tela.</p>
+  </div>
+</main>
+
+<!-- TELA 2: dentro da sala -->
+<main id="roomView" class="view room-view hidden">
+  <section class="stage-panel">
+    <div class="stage-head">
+      <h2>Transmissões <span class="live-count" id="liveCount">0 AO VIVO</span></h2>
+    </div>
+    <div id="stageGrid" class="stage-grid">
+      <div class="stage-empty" id="stageEmpty">
+        <div class="empty-icon"></div>
+        <p class="empty-title">Aguardando a primeira transmissão</p>
+        <p class="empty-sub">Quando alguém compartilhar a tela, ela aparece aqui.</p>
+      </div>
+    </div>
+  </section>
+
+  <aside class="side-panel">
+    <div class="side-block">
+      <p class="side-label">SUA TRANSMISSÃO</p>
+      <button id="shareBtn" class="btn-primary btn-share">Compartilhar tela</button>
+      <button id="stopShareBtn" class="btn-secondary hidden">Parar transmissão</button>
+      <p class="hint">Escolha uma tela, janela ou guia. O áudio entra junto se você marcar.</p>
+    </div>
+
+    <div class="side-block">
+      <p class="side-label">PARTICIPANTES <span id="participantCount">1</span></p>
+      <ul id="participantList" class="participant-list"></ul>
+    </div>
+
+    <div class="side-block room-link-block">
+      <p class="side-label">LINK DA SALA</p>
+      <div class="link-row">
+        <input id="roomLinkInput" class="field field-small" type="text" readonly />
+        <button id="copyLinkBtn" class="btn-secondary btn-small">Copiar</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<template id="videoTileTemplate">
+  <div class="video-tile">
+    <video autoplay playsinline></video>
+    <div class="video-tile-label">
+      <span class="live-dot"></span>
+      <span class="tile-name"></span>
+    </div>
+  </div>
+</template>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
