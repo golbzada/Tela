@@ -43,7 +43,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 function getIceServers() {
   const iceServers = [];
 
-  // STUN servers
+  // Servidores STUN
   const stunEnv = process.env.STUN_URL;
   if (stunEnv) {
     const stunUrls = stunEnv.split(',').map((u) => u.trim()).filter(Boolean);
@@ -56,11 +56,13 @@ function getIceServers() {
         'stun:stun.l.google.com:19302',
         'stun:stun1.l.google.com:19302',
         'stun:stun2.l.google.com:19302',
+        'stun:stun3.l.google.com:19302',
+        'stun:stun4.l.google.com:19302',
       ],
     });
   }
 
-  // TURN servers
+  // Servidores TURN
   const turnEnv = process.env.TURN_URL;
   if (turnEnv) {
     const turnUrls = turnEnv.split(',').map((u) => u.trim()).filter(Boolean);
@@ -74,20 +76,6 @@ function getIceServers() {
       }
       iceServers.push(turnConfig);
     }
-  } else {
-    // Fallback público com suporte a TURN (UDP e TCP) para garantir conexões em redes com CGNAT
-    iceServers.push(
-      {
-        urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443'],
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: ['turn:openrelay.metered.ca:443?transport=tcp'],
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      }
-    );
   }
 
   return iceServers;
@@ -98,7 +86,7 @@ app.get('/api/ice-servers', (req, res) => {
   res.json({ iceServers: getIceServers() });
 });
 
-// roomId -> { participants: Map(socketId -> {name}), emptyTimer: Timeout|null }
+// roomId -> { participants: Map(socketId -> { name: string, isSharing: boolean }), emptyTimer: Timeout|null }
 const rooms = new Map();
 
 function getRoom(roomId) {
@@ -114,6 +102,7 @@ function participantList(roomId) {
   return Array.from(room.participants.entries()).map(([id, data]) => ({
     id,
     name: data.name,
+    isSharing: !!data.isSharing,
   }));
 }
 
@@ -149,13 +138,28 @@ io.on('connection', (socket) => {
       roomData.emptyTimer = null;
     }
 
-    // Envia pro novo participante a lista de quem já está na sala
+    // Envia para o novo participante a lista de quem já está na sala com status de transmissão
     const existing = participantList(room);
-    roomData.participants.set(socket.id, { name: cleanName });
+    roomData.participants.set(socket.id, { name: cleanName, isSharing: false });
 
     socket.emit('joined', { selfId: socket.id, existingPeers: existing });
-    socket.to(room).emit('peer-joined', { id: socket.id, name: cleanName });
+    socket.to(room).emit('peer-joined', { id: socket.id, name: cleanName, isSharing: false });
     broadcastParticipants(room);
+  });
+
+  // Notifica início ou término de compartilhamento de tela
+  socket.on('share-state', ({ sharing }) => {
+    if (!currentRoom) return;
+    const roomData = rooms.get(currentRoom);
+    if (roomData && roomData.participants.has(socket.id)) {
+      const p = roomData.participants.get(socket.id);
+      p.isSharing = !!sharing;
+      socket.to(currentRoom).emit('peer-share-state', {
+        id: socket.id,
+        sharing: !!sharing,
+      });
+      broadcastParticipants(currentRoom);
+    }
   });
 
   // Repassa sinalização WebRTC (offer/answer/ice candidate) para o peer alvo

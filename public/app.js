@@ -5,16 +5,8 @@
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
-      {
-        urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443'],
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: ['turn:openrelay.metered.ca:443?transport=tcp'],
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
     ],
   };
 
@@ -51,15 +43,17 @@
   //   makingOffer: boolean,
   //   ignoreOffer: boolean,
   //   isSettingRemoteAnswerPending: boolean,
-  //   iceCandidateQueue: Array,
+  //   isSharing: boolean,
+  //   restartCount: number,
   //   lastRestartTime: number,
+  //   iceCandidateQueue: Array,
   //   videoTransceiver: RTCRtpTransceiver,
   //   audioTransceiver: RTCRtpTransceiver,
   //   remoteStream: MediaStream
   // }
   const peers = new Map();
   const remoteTiles = new Map(); // peerId -> tile element
-  const participantsState = new Map(); // peerId -> name
+  const participantsState = new Map(); // peerId -> { name: string, isSharing: boolean }
 
   // ---------- elementos ----------
   const joinView = document.getElementById('joinView');
@@ -139,26 +133,59 @@
     socket.on('joined', ({ selfId: id, existingPeers }) => {
       selfId = id;
       console.log(`[GOLBTELAS] Entrou na sala ${roomId} com ID ${selfId}. Peers existentes:`, existingPeers);
-      participantsState.set(selfId, selfName);
+      participantsState.set(selfId, { name: selfName, isSharing: false });
       joinView.classList.add('hidden');
       roomView.classList.remove('hidden');
 
       existingPeers.forEach((p) => {
-        participantsState.set(p.id, p.name);
-        ensurePeer(p.id, p.name);
+        participantsState.set(p.id, { name: p.name, isSharing: !!p.isSharing });
+        const peer = ensurePeer(p.id, p.name);
+        peer.isSharing = !!p.isSharing;
       });
       renderParticipants();
     });
 
-    socket.on('peer-joined', ({ id, name }) => {
+    socket.on('peer-joined', ({ id, name, isSharing }) => {
       console.log(`[GOLBTELAS] Novo participante entrou: ${name} (${id})`);
-      participantsState.set(id, name);
-      ensurePeer(id, name);
+      participantsState.set(id, { name, isSharing: !!isSharing });
+      const peer = ensurePeer(id, name);
+      peer.isSharing = !!isSharing;
       renderParticipants();
     });
 
     socket.on('participants-update', (list) => {
-      list.forEach((p) => participantsState.set(p.id, p.name));
+      list.forEach((p) => {
+        participantsState.set(p.id, { name: p.name, isSharing: !!p.isSharing });
+        const peer = peers.get(p.id);
+        if (peer) {
+          peer.isSharing = !!p.isSharing;
+          if (!peer.isSharing) {
+            removeRemoteTile(p.id);
+          } else if (peer.remoteStream && peer.remoteStream.getVideoTracks().length > 0) {
+            showRemoteTile(p.id, peer.remoteStream);
+          }
+        }
+      });
+      renderParticipants();
+    });
+
+    socket.on('peer-share-state', ({ id, sharing }) => {
+      console.log(`[GOLBTELAS] Peer ${id} alterou estado de transmissão: sharing=${sharing}`);
+      const pState = participantsState.get(id);
+      if (pState) {
+        pState.isSharing = sharing;
+      }
+      const peer = peers.get(id);
+      if (peer) {
+        peer.isSharing = sharing;
+        if (sharing) {
+          if (peer.remoteStream && peer.remoteStream.getVideoTracks().length > 0) {
+            showRemoteTile(id, peer.remoteStream);
+          }
+        } else {
+          removeRemoteTile(id);
+        }
+      }
       renderParticipants();
     });
 
@@ -173,7 +200,8 @@
 
       let peer = peers.get(from);
       if (!peer) {
-        peer = ensurePeer(from, participantsState.get(from) || 'Participante');
+        const pInfo = participantsState.get(from);
+        peer = ensurePeer(from, pInfo ? pInfo.name : 'Participante');
       }
       const { pc, name } = peer;
 
@@ -218,7 +246,6 @@
           }
         } else if (data.candidate) {
           const candidateData = data.candidate;
-          console.log(`[GOLBTELAS][${name}] Sinalização de ICE Candidate recebida`);
 
           // Se a remoteDescription já estiver pronta, adiciona imediatamente. Senão, enfileira.
           if (pc.remoteDescription && pc.remoteDescription.type) {
@@ -266,8 +293,10 @@
       makingOffer: false,
       ignoreOffer: false,
       isSettingRemoteAnswerPending: false,
-      iceCandidateQueue: [],
+      isSharing: false,
+      restartCount: 0,
       lastRestartTime: 0,
+      iceCandidateQueue: [],
       videoTransceiver,
       audioTransceiver,
       remoteStream: new MediaStream(),
@@ -292,8 +321,10 @@
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
       console.log(`[GOLBTELAS][${name}] ICE Connection State: ${state}`);
-      if (state === 'failed') {
-        console.warn(`[GOLBTELAS][${name}] ICE Connection State entrou em FAILED. Tentando restartIce()...`);
+      if (state === 'connected' || state === 'completed') {
+        peer.restartCount = 0; // Reseta contador de tentativas quando conectado com sucesso
+      } else if (state === 'failed') {
+        console.warn(`[GOLBTELAS][${name}] ICE Connection State entrou em FAILED.`);
         handleIceFailure(peerId, peer);
       }
     };
@@ -301,8 +332,10 @@
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       console.log(`[GOLBTELAS][${name}] Peer Connection State: ${state}`);
-      if (state === 'failed') {
-        console.warn(`[GOLBTELAS][${name}] Peer Connection State entrou em FAILED. Tentando restartIce()...`);
+      if (state === 'connected') {
+        peer.restartCount = 0;
+      } else if (state === 'failed') {
+        console.warn(`[GOLBTELAS][${name}] Peer Connection State entrou em FAILED.`);
         handleIceFailure(peerId, peer);
       } else if (state === 'closed' || state === 'disconnected') {
         console.log(`[GOLBTELAS][${name}] Conexão ${state}.`);
@@ -318,12 +351,10 @@
     };
 
     pc.onicecandidateerror = (e) => {
-      console.error(`[GOLBTELAS][${name}] Erro de ICE Candidate:`, {
+      console.warn(`[GOLBTELAS][${name}] Aviso de ICE Candidate:`, {
         errorCode: e.errorCode,
         errorText: e.errorText,
         url: e.url,
-        address: e.address,
-        port: e.port,
       });
     };
 
@@ -346,26 +377,19 @@
     pc.ontrack = (e) => {
       console.log(`[GOLBTELAS][${name}] ontrack recebido: kind=${e.track.kind}, id=${e.track.id}, streams=${e.streams.length}`);
 
-      // Usa event.streams[0] se presente, ou remonta na stream dedicada
-      let streamToUse = null;
-      if (e.streams && e.streams[0]) {
-        streamToUse = e.streams[0];
-      } else {
-        if (!peer.remoteStream.getTracks().includes(e.track)) {
-          peer.remoteStream.addTrack(e.track);
-        }
-        streamToUse = peer.remoteStream;
+      if (!peer.remoteStream.getTracks().includes(e.track)) {
+        peer.remoteStream.addTrack(e.track);
       }
-      peer.remoteStream = streamToUse;
 
-      if (e.track.kind === 'video') {
-        showRemoteTile(peerId, streamToUse);
+      // Só exibe a tile de vídeo remoto se o peer estiver compartilhando tela ou a track estiver ativa
+      if (e.track.kind === 'video' && peer.isSharing) {
+        showRemoteTile(peerId, peer.remoteStream);
       }
 
       e.track.onunmute = () => {
         console.log(`[GOLBTELAS][${name}] Faixa de ${e.track.kind} ativa (onunmute)`);
-        if (e.track.kind === 'video') {
-          showRemoteTile(peerId, streamToUse);
+        if (e.track.kind === 'video' && peer.isSharing) {
+          showRemoteTile(peerId, peer.remoteStream);
         }
       };
 
@@ -378,7 +402,7 @@
       };
     };
 
-    // Se já estiver transmitindo quando um novo peer entrar, injeta as tracks
+    // Se eu já estiver transmitindo quando um novo peer entrar, injeta as faixas
     if (localStream) {
       const vTrack = localStream.getVideoTracks()[0] || null;
       const aTrack = localStream.getAudioTracks()[0] || null;
@@ -393,16 +417,22 @@
     return peer;
   }
 
-  // Reconexão ICE quando entrar em failed
+  // Reconexão ICE quando entrar em failed (com limite de tentativas e cooldown)
   function handleIceFailure(peerId, peer) {
     const now = Date.now();
-    if (now - peer.lastRestartTime < 4000) {
+    if (now - peer.lastRestartTime < 8000) {
       console.log(`[GOLBTELAS][${peer.name}] Cooldown de restartIce ativo. Aguardando...`);
       return;
     }
+    if (peer.restartCount >= 2) {
+      console.warn(`[GOLBTELAS][${peer.name}] Limite máximo de tentativas de restartIce atingido.`);
+      return;
+    }
+
+    peer.restartCount = (peer.restartCount || 0) + 1;
     peer.lastRestartTime = now;
 
-    console.log(`[GOLBTELAS][${peer.name}] Executando restartIce()...`);
+    console.log(`[GOLBTELAS][${peer.name}] Executando restartIce() (Tentativa ${peer.restartCount}/2)...`);
     if (typeof peer.pc.restartIce === 'function') {
       try {
         peer.pc.restartIce();
@@ -410,7 +440,6 @@
         console.warn(`[GOLBTELAS][${peer.name}] Falha ao chamar pc.restartIce():`, err);
       }
     } else {
-      // Fallback para navegadores sem restartIce nativo
       (async () => {
         try {
           peer.makingOffer = true;
@@ -488,6 +517,13 @@
       }
     });
 
+    if (socket && socket.connected) {
+      socket.emit('share-state', { sharing: true });
+    }
+
+    const myState = participantsState.get(selfId);
+    if (myState) myState.isSharing = true;
+
     showLocalTile(localStream);
 
     shareBtn.classList.add('hidden');
@@ -511,6 +547,13 @@
     localStream.getTracks().forEach((t) => t.stop());
     localStream = null;
 
+    if (socket && socket.connected) {
+      socket.emit('share-state', { sharing: false });
+    }
+
+    const myState = participantsState.get(selfId);
+    if (myState) myState.isSharing = false;
+
     removeRemoteTile('local');
 
     shareBtn.classList.remove('hidden');
@@ -527,7 +570,7 @@
       tile.dataset.peerId = 'local';
       tile.classList.add('is-self');
       const muteBtn = tile.querySelector('.mute-toggle');
-      if (muteBtn) muteBtn.remove(); // Sua própria tela não precisa de botão de som
+      if (muteBtn) muteBtn.remove();
       stageGrid.appendChild(tile);
       remoteTiles.set('local', tile);
     }
@@ -576,12 +619,12 @@
     video.setAttribute('playsinline', '');
     video.setAttribute('webkit-playsinline', '');
 
-    // Atribui event.streams[0] (ou o stream remoto equivalente) ao srcObject do vídeo
     if (video.srcObject !== stream) {
       video.srcObject = stream;
     }
 
-    tile.querySelector('.tile-name').textContent = participantsState.get(peerId) || 'Participante';
+    const pState = participantsState.get(peerId);
+    tile.querySelector('.tile-name').textContent = pState ? pState.name : 'Participante';
     attemptPlay(video);
     updateStageEmptyState();
     updateLiveCount();
@@ -592,7 +635,6 @@
     const p = video.play();
     if (p && typeof p.catch === 'function') {
       p.catch(() => {
-        // Se autoplay com som falhar por política de segurança do navegador, muta e reproduz
         video.muted = true;
         video.play().catch(() => {});
       });
@@ -618,8 +660,12 @@
   }
 
   function updateLiveCount() {
-    const total = remoteTiles.size + (localStream ? 1 : 0);
-    liveCount.textContent = `${total} AO VIVO`;
+    let count = 0;
+    if (localStream) count++;
+    remoteTiles.forEach((_, key) => {
+      if (key !== 'local') count++;
+    });
+    liveCount.textContent = `${count} AO VIVO`;
   }
 
   // Render: lista de participantes
@@ -627,17 +673,17 @@
     participantList.innerHTML = '';
     const all = Array.from(participantsState.entries());
 
-    all.forEach(([id, name]) => {
+    all.forEach(([id, data]) => {
       if (!id) return;
       const li = document.createElement('li');
       li.className = 'participant-item';
 
       const avatar = document.createElement('div');
       avatar.className = 'avatar';
-      avatar.textContent = (name || '?').trim().charAt(0).toUpperCase();
+      avatar.textContent = (data.name || '?').trim().charAt(0).toUpperCase();
 
       const nameSpan = document.createElement('span');
-      nameSpan.textContent = name;
+      nameSpan.textContent = data.name;
       nameSpan.style.flex = '1';
 
       li.appendChild(avatar);
@@ -654,7 +700,7 @@
           liveTag.textContent = 'AO VIVO';
           li.appendChild(liveTag);
         }
-      } else if (remoteTiles.has(id)) {
+      } else if (data.isSharing) {
         const liveTag = document.createElement('span');
         liveTag.className = 'tag tag-live';
         liveTag.textContent = 'AO VIVO';
