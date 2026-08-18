@@ -4,13 +4,63 @@ const path = require('path');
 const { Server } = require('socket.io');
 
 const app = express();
+app.set('trust proxy', 1);
+
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: { origin: '*' },
+  transports: ['websocket', 'polling'],
+});
 
 const PORT = process.env.PORT || 3000;
 const EMPTY_ROOM_TIMEOUT_MS = 5 * 60 * 1000; // sala fecha 5 min depois de ficar vazia
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Monta lista de servidores ICE a partir de variáveis de ambiente
+function getIceServers() {
+  const iceServers = [];
+
+  // STUN servers
+  const stunEnv = process.env.STUN_URL;
+  if (stunEnv) {
+    const stunUrls = stunEnv.split(',').map((u) => u.trim()).filter(Boolean);
+    if (stunUrls.length > 0) {
+      iceServers.push({ urls: stunUrls });
+    }
+  } else {
+    iceServers.push({
+      urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+      ],
+    });
+  }
+
+  // TURN servers
+  const turnEnv = process.env.TURN_URL;
+  if (turnEnv) {
+    const turnUrls = turnEnv.split(',').map((u) => u.trim()).filter(Boolean);
+    if (turnUrls.length > 0) {
+      const turnConfig = { urls: turnUrls };
+      if (process.env.TURN_USERNAME) {
+        turnConfig.username = process.env.TURN_USERNAME;
+      }
+      if (process.env.TURN_CREDENTIAL) {
+        turnConfig.credential = process.env.TURN_CREDENTIAL;
+      }
+      iceServers.push(turnConfig);
+    }
+  }
+
+  return iceServers;
+}
+
+// Endpoint para fornecer servidores ICE dinamicamente ao frontend
+app.get('/api/ice-servers', (req, res) => {
+  res.json({ iceServers: getIceServers() });
+});
 
 // roomId -> { participants: Map(socketId -> {name}), emptyTimer: Timeout|null }
 const rooms = new Map();
@@ -63,8 +113,7 @@ io.on('connection', (socket) => {
       roomData.emptyTimer = null;
     }
 
-    // Envia pro novo participante a lista de quem ja esta na sala,
-    // ele sera responsavel por iniciar a conexao WebRTC com cada um.
+    // Envia pro novo participante a lista de quem já está na sala
     const existing = participantList(room);
     roomData.participants.set(socket.id, { name: cleanName });
 
@@ -73,9 +122,9 @@ io.on('connection', (socket) => {
     broadcastParticipants(room);
   });
 
-  // Repassa sinalizacao WebRTC (offer/answer/ice candidate) para o peer alvo
+  // Repassa sinalização WebRTC (offer/answer/ice candidate) para o peer alvo
   socket.on('signal', ({ to, data }) => {
-    if (!to) return;
+    if (!to || !data) return;
     io.to(to).emit('signal', { from: socket.id, data });
   });
 
@@ -104,4 +153,5 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`TelaJunto rodando em http://localhost:${PORT}`);
+  console.log('Servidores ICE configurados:', JSON.stringify(getIceServers(), null, 2));
 });

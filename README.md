@@ -6,17 +6,29 @@ compartilhar ou ver a tela de quem estiver transmitindo.
 
 ## Como funciona
 
-- `server.js`: servidor de sinalização (Express + Socket.io). Ele não recebe nem
-  retransmite vídeo — só troca as mensagens necessárias para os navegadores se
-  conectarem direto entre si (WebRTC).
-- `public/`: front-end (tela de entrar na sala + tela de transmissão).
-- O vídeo trafega **peer-to-peer** entre os navegadores (mesh). Isso significa
-  que o consumo de upload de quem está transmitindo cresce com o número de
-  espectadores — funciona bem para grupos pequenos (uso pessoal entre amigos).
-- Salas são identificadas pelo parâmetro `?room=` na URL. Se ninguém enviar um,
-  o próprio site gera um código e atualiza o link.
-- Uma sala é esquecida da memória do servidor 5 minutos depois de ficar vazia
-  (não existe gravação nem histórico — nada fica salvo).
+- `server.js`: servidor de sinalização (Express + Socket.io) e fornecedor de configurações ICE (`/api/ice-servers`).
+- `public/`: front-end (tela de entrar na sala + tela de transmissão WebRTC).
+- O vídeo trafega **peer-to-peer** entre os navegadores (mesh WebRTC).
+- Salas são identificadas pelo parâmetro `?room=` na URL.
+- Suporte a fila de ICE Candidates assíncronos, Perfect Negotiation, reconexão automática com `restartIce()` e suporte completo a STUN/TURN.
+
+## Configuração de STUN e TURN (Variáveis de Ambiente)
+
+Para garantir conexões em redes corporativas, celulares ou sob CGNAT/NAT restritivo, configure servidores STUN/TURN no seu ambiente ou arquivo `.env`:
+
+```env
+PORT=3000
+
+# STUN (opcional, padrão Google STUN)
+STUN_URL=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
+
+# TURN (opcional / recomendado para produção)
+TURN_URL=turn:turn.meudominio.com:3478,turns:turn.meudominio.com:5349?transport=tcp
+TURN_USERNAME=usuario_turn
+TURN_CREDENTIAL=senha_turn
+```
+
+As credenciais não são expostas de forma estática no frontend; o cliente consome a rota `/api/ice-servers` dinamicamente ao iniciar.
 
 ## Rodando localmente
 
@@ -25,26 +37,9 @@ npm install
 npm start
 ```
 
-Acesse `http://localhost:3000`. Compartilhe o link que aparece no painel lateral
-("LINK DA SALA") com quem você quiser que entre na mesma sala.
+Acesse `http://localhost:3000`. Compartilhe o link que aparece no painel lateral ("LINK DA SALA") com quem você quiser que entre na mesma sala.
 
 ## Deploy
 
-**Importante:** este app precisa de um processo Node.js rodando continuamente
-para manter as conexões WebSocket abertas — a Vercel (no plano padrão de
-funções serverless) não é um bom encaixe para isso. Use algo como:
-
-- [Railway](https://railway.app) ou [Render](https://render.com) — sobe o
-  repositório, ele detecta o `npm start` e já funciona com WebSocket.
-- Uma VPS simples (ex: um droplet da DigitalOcean) rodando `node server.js`
-  atrás de um Nginx com proxy reverso, usando PM2 para manter o processo vivo.
-
-Depois de publicado, troque `localhost:3000` pelo domínio real — o `app.js`
-já usa `window.location.origin` automaticamente, então não precisa mexer em
-nada no código pra isso funcionar.
-
-## Personalizar
-
-- Nome/marca: edite `public/index.html` (`.brand-word`) e `public/style.css`
-  (variáveis `--accent`, `--bg` no topo do arquivo).
-- Limite de tempo de sala vazia: constante `EMPTY_ROOM_TIMEOUT_MS` em `server.js`.
+- [Railway](https://railway.app) ou [Render](https://render.com) — configure as variáveis de ambiente (`TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`, etc.) no painel do serviço.
+- Em VPS, execute via PM2 com proxy reverso (Nginx com suporte a WebSocket `wss://`).
