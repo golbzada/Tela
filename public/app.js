@@ -1,4 +1,8 @@
 (() => {
+  const SERVER_URL = (window.location.hostname === 'localhost' && window.location.port === '3000')
+    ? 'http://localhost:3000'
+    : 'https://tela-production-dff8.up.railway.app';
+
   // Configuração padrão de ICE Servers (fallback caso a API falhe)
   let rtcConfiguration = {
     iceServers: [
@@ -13,7 +17,7 @@
   // Carrega configuração de servidores STUN/TURN dinamicamente da API do servidor
   async function loadIceConfig() {
     try {
-      const res = await fetch('/api/ice-servers');
+      const res = await fetch(`${SERVER_URL}/api/ice-servers`);
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
@@ -26,7 +30,6 @@
     }
   }
 
-  // Carrega configurações ICE imediatamente ao iniciar o script
   loadIceConfig();
 
   // ---------- estado ----------
@@ -36,23 +39,12 @@
   let roomId = getRoomIdFromUrl();
   let localStream = null;
   let isCameraActive = false;
-  let currentFacingMode = 'user'; // 'user' (frontal) ou 'environment' (traseira)
+  let isNativeCaptureActive = false;
+  let nativeFrameListener = null;
+  let nativeStopListener = null;
+  let currentFacingMode = 'user';
+  let currentSpotlightId = null; // null = Modo Grade; string (peerId ou 'local') = Modo Foco
 
-  // peerId -> {
-  //   pc: RTCPeerConnection,
-  //   name: string,
-  //   polite: boolean,
-  //   makingOffer: boolean,
-  //   ignoreOffer: boolean,
-  //   isSettingRemoteAnswerPending: boolean,
-  //   isSharing: boolean,
-  //   restartCount: number,
-  //   lastRestartTime: number,
-  //   iceCandidateQueue: Array,
-  //   videoTransceiver: RTCRtpTransceiver,
-  //   audioTransceiver: RTCRtpTransceiver,
-  //   remoteStream: MediaStream
-  // }
   const peers = new Map();
   const remoteTiles = new Map(); // peerId -> tile element
   const participantsState = new Map(); // peerId -> { name: string, isSharing: boolean }
@@ -64,9 +56,15 @@
   const joinBtn = document.getElementById('joinBtn');
   const connDot = document.getElementById('connDot');
 
+  const stagePanel = document.getElementById('stagePanel');
   const stageGrid = document.getElementById('stageGrid');
   const stageEmpty = document.getElementById('stageEmpty');
   const liveCount = document.getElementById('liveCount');
+
+  const layoutGridBtn = document.getElementById('layoutGridBtn');
+  const layoutFocusBtn = document.getElementById('layoutFocusBtn');
+  const panelFullscreenBtn = document.getElementById('panelFullscreenBtn');
+  const stageFullscreenBtn = document.getElementById('stageFullscreenBtn');
 
   const shareBtn = document.getElementById('shareBtn');
   const cameraBtn = document.getElementById('cameraBtn');
@@ -78,15 +76,13 @@
   const copyLinkBtn = document.getElementById('copyLinkBtn');
   const videoTileTemplate = document.getElementById('videoTileTemplate');
 
-  roomLinkInput.value = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+  roomLinkInput.value = `https://tela-production-dff8.up.railway.app/?room=${roomId}`;
 
   function getRoomIdFromUrl() {
     const params = new URLSearchParams(window.location.search);
     let r = params.get('room');
     if (!r) {
       r = 'sala-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-      params.set('room', r);
-      history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
     }
     return r;
   }
@@ -107,30 +103,24 @@
     joinBtn.disabled = true;
     joinBtn.textContent = 'Entrando...';
 
-    // Garante que a configuração mais recente de ICE foi buscada
     await loadIceConfig();
     connectSocket();
   }
 
   function connectSocket() {
-    const isHttps = window.location.protocol === 'https:';
-    socket = io(window.location.origin, {
-      secure: isHttps,
+    socket = io(SERVER_URL, {
+      secure: SERVER_URL.startsWith('https:'),
       transports: ['websocket', 'polling'],
     });
 
     socket.on('connect', () => {
-      console.log(`[GOLBTELAS] Conectado ao servidor de sinalização (${socket.id}) via ${socket.io.engine.transport.name}`);
+      console.log(`[GOLBTELAS] Conectado ao servidor (${socket.id})`);
       connDot.style.background = '#3DDC84';
       socket.emit('join-room', { room: roomId, name: selfName });
     });
 
-    socket.io.engine.on('upgrade', (transport) => {
-      console.log(`[GOLBTELAS] WebSocket atualizado para transporte: ${transport.name}`);
-    });
-
     socket.on('disconnect', (reason) => {
-      console.warn('[GOLBTELAS] Desconectado do servidor de sinalização:', reason);
+      console.warn('[GOLBTELAS] Desconectado do servidor:', reason);
       connDot.style.background = 'var(--live)';
     });
 
@@ -150,7 +140,6 @@
     });
 
     socket.on('peer-joined', ({ id, name, isSharing }) => {
-      console.log(`[GOLBTELAS] Novo participante entrou: ${name} (${id})`);
       participantsState.set(id, { name, isSharing: !!isSharing });
       const peer = ensurePeer(id, name);
       peer.isSharing = !!isSharing;
@@ -174,11 +163,8 @@
     });
 
     socket.on('peer-share-state', ({ id, sharing }) => {
-      console.log(`[GOLBTELAS] Peer ${id} alterou estado de transmissão: sharing=${sharing}`);
       const pState = participantsState.get(id);
-      if (pState) {
-        pState.isSharing = sharing;
-      }
+      if (pState) pState.isSharing = sharing;
       const peer = peers.get(id);
       if (peer) {
         peer.isSharing = sharing;
@@ -194,7 +180,6 @@
     });
 
     socket.on('peer-left', ({ id }) => {
-      console.log(`[GOLBTELAS] Participante saiu: ${id}`);
       removePeer(id);
       renderParticipants();
     });
@@ -212,62 +197,40 @@
       try {
         if (data.description) {
           const description = data.description;
-          console.log(`[GOLBTELAS][${name}] Mensagem de sinalização recebida: SDP ${description.type}`);
-
-          // Perfect Negotiation: detecção de colisão de ofertas
           const readyForOffer = !peer.makingOffer && (pc.signalingState === 'stable' || peer.isSettingRemoteAnswerPending);
           const offerCollision = description.type === 'offer' && !readyForOffer;
 
           peer.ignoreOffer = !peer.polite && offerCollision;
-          if (peer.ignoreOffer) {
-            console.warn(`[GOLBTELAS][${name}] Colisão detectada: oferta remota ignorada (peer impolite)`);
-            return;
-          }
+          if (peer.ignoreOffer) return;
 
           peer.isSettingRemoteAnswerPending = (description.type === 'answer');
-          console.log(`[GOLBTELAS][${name}] Aplicando setRemoteDescription (${description.type})`);
           await pc.setRemoteDescription(new RTCSessionDescription(description));
           peer.isSettingRemoteAnswerPending = false;
 
-          // Esvazia e processa a fila de ICE candidates recebidos antes da remoteDescription
           if (peer.iceCandidateQueue.length > 0) {
-            console.log(`[GOLBTELAS][${name}] Processando ${peer.iceCandidateQueue.length} candidatos ICE enfileirados...`);
             const candidates = peer.iceCandidateQueue.splice(0, peer.iceCandidateQueue.length);
             for (const cand of candidates) {
               try {
                 await pc.addIceCandidate(new RTCIceCandidate(cand));
-                console.log(`[GOLBTELAS][${name}] Candidato enfileirado aplicado com sucesso`);
-              } catch (candidateErr) {
-                console.warn(`[GOLBTELAS][${name}] Erro ao aplicar candidato enfileirado:`, candidateErr);
-              }
+              } catch (err) {}
             }
           }
 
           if (description.type === 'offer') {
-            console.log(`[GOLBTELAS][${name}] Criando e definindo resposta (answer) local...`);
             await pc.setLocalDescription();
             sendSignal(from, { description: pc.localDescription });
           }
         } else if (data.candidate) {
-          const candidateData = data.candidate;
-
-          // Se a remoteDescription já estiver pronta, adiciona imediatamente. Senão, enfileira.
           if (pc.remoteDescription && pc.remoteDescription.type) {
             try {
-              await pc.addIceCandidate(new RTCIceCandidate(candidateData));
-              console.log(`[GOLBTELAS][${name}] Candidato ICE adicionado com sucesso`);
-            } catch (err) {
-              if (!peer.ignoreOffer) {
-                console.warn(`[GOLBTELAS][${name}] Falha ao adicionar ICE candidate imediato:`, err);
-              }
-            }
+              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } catch (err) {}
           } else {
-            console.log(`[GOLBTELAS][${name}] setRemoteDescription ainda não executado. Enfileirando ICE candidate.`);
-            peer.iceCandidateQueue.push(candidateData);
+            peer.iceCandidateQueue.push(data.candidate);
           }
         }
       } catch (err) {
-        console.error(`[GOLBTELAS][${name}] Erro no processamento de sinalização:`, err);
+        console.error(`[GOLBTELAS][${name}] Erro no sinal:`, err);
       }
     });
   }
@@ -281,9 +244,7 @@
   // ---------- WebRTC peer management ----------
   function ensurePeer(peerId, name) {
     if (peers.has(peerId)) return peers.get(peerId);
-    console.log(`[GOLBTELAS] Criando RTCPeerConnection individual para ${name} (${peerId})`);
 
-    // Padrão Perfect Negotiation: define quem cede em caso de colisão de ofertas
     const polite = selfId ? selfId < peerId : true;
     const pc = new RTCPeerConnection(rtcConfiguration);
 
@@ -307,176 +268,87 @@
     };
     peers.set(peerId, peer);
 
-    // Envio de ICE candidates locais via sinalização
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        console.log(
-          `[GOLBTELAS][${name}] ICE Candidate gerado: tipo=${e.candidate.type || 'unknown'}, ` +
-          `protocolo=${e.candidate.protocol || 'unknown'}, ` +
-          `endereço=${e.candidate.address || e.candidate.ip || 'unknown'}:${e.candidate.port || ''}`
-        );
         sendSignal(peerId, { candidate: e.candidate });
-      } else {
-        console.log(`[GOLBTELAS][${name}] Todos os ICE candidates locais foram coletados (null candidate).`);
       }
     };
 
-    // Diagnósticos e logs detalhados de estados
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
-      console.log(`[GOLBTELAS][${name}] ICE Connection State: ${state}`);
       if (state === 'connected' || state === 'completed') {
         peer.restartCount = 0;
       } else if (state === 'failed') {
-        console.warn(`[GOLBTELAS][${name}] ICE Connection State entrou em FAILED.`);
         handleIceFailure(peerId, peer);
       }
     };
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
-      console.log(`[GOLBTELAS][${name}] Peer Connection State: ${state}`);
       if (state === 'connected') {
         peer.restartCount = 0;
       } else if (state === 'failed') {
-        console.warn(`[GOLBTELAS][${name}] Peer Connection State entrou em FAILED.`);
         handleIceFailure(peerId, peer);
-      } else if (state === 'closed' || state === 'disconnected') {
-        console.log(`[GOLBTELAS][${name}] Conexão ${state}.`);
       }
     };
 
-    pc.onsignalingstatechange = () => {
-      console.log(`[GOLBTELAS][${name}] Signaling State: ${pc.signalingState}`);
-    };
-
-    pc.onicegatheringstatechange = () => {
-      console.log(`[GOLBTELAS][${name}] ICE Gathering State: ${pc.iceGatheringState}`);
-    };
-
-    pc.onicecandidateerror = (e) => {
-      console.warn(`[GOLBTELAS][${name}] Aviso de ICE Candidate:`, {
-        errorCode: e.errorCode,
-        errorText: e.errorText,
-        url: e.url,
-      });
-    };
-
-    // Tratamento de negotiationneeded com Perfect Negotiation
     pc.onnegotiationneeded = async () => {
-      console.log(`[GOLBTELAS][${name}] onnegotiationneeded disparado.`);
       try {
         peer.makingOffer = true;
         await pc.setLocalDescription();
-        console.log(`[GOLBTELAS][${name}] Enviando oferta SDP local originada por negotiationneeded`);
         sendSignal(peerId, { description: pc.localDescription });
       } catch (err) {
-        console.error(`[GOLBTELAS][${name}] Falha durante negociação automática:`, err);
+        console.error(`[GOLBTELAS][${name}] Falha na negociação:`, err);
       } finally {
         peer.makingOffer = false;
       }
     };
 
-    // Recepção e atribuição de faixas de mídia (ontrack)
     pc.ontrack = (e) => {
-      console.log(`[GOLBTELAS][${name}] ontrack recebido: kind=${e.track.kind}, id=${e.track.id}, streams=${e.streams.length}`);
-
       if (!peer.remoteStream.getTracks().includes(e.track)) {
         peer.remoteStream.addTrack(e.track);
       }
-
-      // Só exibe a tile de vídeo remoto se o peer estiver compartilhando tela/câmera ou a track estiver ativa
       if (e.track.kind === 'video' && peer.isSharing) {
         showRemoteTile(peerId, peer.remoteStream);
       }
-
       e.track.onunmute = () => {
-        console.log(`[GOLBTELAS][${name}] Faixa de ${e.track.kind} ativa (onunmute)`);
         if (e.track.kind === 'video' && peer.isSharing) {
           showRemoteTile(peerId, peer.remoteStream);
         }
       };
-
-      e.track.onmute = () => {
-        console.log(`[GOLBTELAS][${name}] Faixa de ${e.track.kind} mutada (onmute)`);
-      };
-
-      e.track.onended = () => {
-        console.log(`[GOLBTELAS][${name}] Faixa de ${e.track.kind} finalizada (onended)`);
-      };
     };
 
-    // Se eu já estiver transmitindo quando um novo peer entrar, injeta as faixas
     if (localStream) {
       const vTrack = localStream.getVideoTracks()[0] || null;
       const aTrack = localStream.getAudioTracks()[0] || null;
-      videoTransceiver.sender.replaceTrack(vTrack).catch((err) =>
-        console.error(`[GOLBTELAS] Erro ao aplicar videoTrack no novo peer ${name}:`, err)
-      );
-      audioTransceiver.sender.replaceTrack(aTrack).catch((err) =>
-        console.error(`[GOLBTELAS] Erro ao aplicar audioTrack no novo peer ${name}:`, err)
-      );
+      videoTransceiver.sender.replaceTrack(vTrack).catch(() => {});
+      audioTransceiver.sender.replaceTrack(aTrack).catch(() => {});
     }
 
     return peer;
   }
 
-  // Reconexão ICE quando entrar em failed (com limite de tentativas e cooldown)
   function handleIceFailure(peerId, peer) {
     const now = Date.now();
-    if (now - peer.lastRestartTime < 8000) {
-      console.log(`[GOLBTELAS][${peer.name}] Cooldown de restartIce ativo. Aguardando...`);
-      return;
-    }
-    if (peer.restartCount >= 2) {
-      console.warn(`[GOLBTELAS][${peer.name}] Limite máximo de tentativas de restartIce atingido.`);
-      return;
-    }
+    if (now - peer.lastRestartTime < 8000) return;
+    if (peer.restartCount >= 2) return;
 
     peer.restartCount = (peer.restartCount || 0) + 1;
     peer.lastRestartTime = now;
 
-    console.log(`[GOLBTELAS][${peer.name}] Executando restartIce() (Tentativa ${peer.restartCount}/2)...`);
     if (typeof peer.pc.restartIce === 'function') {
       try {
         peer.pc.restartIce();
-      } catch (err) {
-        console.warn(`[GOLBTELAS][${peer.name}] Falha ao chamar pc.restartIce():`, err);
-      }
-    } else {
-      (async () => {
-        try {
-          peer.makingOffer = true;
-          const offer = await peer.pc.createOffer({ iceRestart: true });
-          await peer.pc.setLocalDescription(offer);
-          sendSignal(peerId, { description: peer.pc.localDescription });
-        } catch (err) {
-          console.error(`[GOLBTELAS][${peer.name}] Falha no fallback de iceRestart:`, err);
-        } finally {
-          peer.makingOffer = false;
-        }
-      })();
+      } catch (err) {}
     }
   }
 
-  // Limpeza correta de conexões encerradas
   function removePeer(peerId) {
     const peer = peers.get(peerId);
     if (peer) {
-      console.log(`[GOLBTELAS] Limpando conexão e recursos do peer ${peer.name} (${peerId})`);
       try {
-        peer.pc.onicecandidate = null;
-        peer.pc.oniceconnectionstatechange = null;
-        peer.pc.onconnectionstatechange = null;
-        peer.pc.onsignalingstatechange = null;
-        peer.pc.onicegatheringstatechange = null;
-        peer.pc.onicecandidateerror = null;
-        peer.pc.onnegotiationneeded = null;
-        peer.pc.ontrack = null;
         peer.pc.close();
-      } catch (err) {
-        console.warn(`[GOLBTELAS] Erro ao fechar RTCPeerConnection de ${peer.name}:`, err);
-      }
+      } catch (err) {}
       peers.delete(peerId);
     }
     participantsState.delete(peerId);
@@ -489,10 +361,52 @@
   flipCameraBtn.addEventListener('click', flipCamera);
   stopShareBtn.addEventListener('click', stopShare);
 
-  // Transmissão de Tela (getDisplayMedia) - Dispara a seleção nativa do sistema
   async function startScreenShare() {
+    const isCapacitorNative = !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScreenCapture);
+
+    if (isCapacitorNative) {
+      try {
+        const { ScreenCapture } = window.Capacitor.Plugins;
+        await ScreenCapture.startCapture();
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 720;
+        canvas.height = 1280;
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+
+        const canvasStream = canvas.captureStream(25);
+        localStream = canvasStream;
+        isNativeCaptureActive = true;
+        isCameraActive = false;
+
+        nativeFrameListener = await ScreenCapture.addListener('screenFrame', (data) => {
+          if (data && data.image) {
+            img.onload = () => {
+              if (canvas.width !== img.width || canvas.height !== img.height) {
+                canvas.width = img.width;
+                canvas.height = img.height;
+              }
+              ctx.drawImage(img, 0, 0);
+            };
+            img.src = data.image;
+          }
+        });
+
+        nativeStopListener = await ScreenCapture.addListener('screenCaptureStopped', () => {
+          stopShare();
+        });
+
+        applyLocalStreamAndBroadcast();
+        return;
+      } catch (nativeErr) {
+        console.warn('[GOLBTELAS] Permissão cancelada ou erro:', nativeErr);
+        return;
+      }
+    }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      alert('O compartilhamento de tela não é suportado pelo seu navegador atual. No iPhone, use o Safari. No Android, use o Chrome.');
+      alert('O compartilhamento de tela não é suportado pelo seu navegador atual. Use o app Android ou acesse pelo computador.');
       return;
     }
 
@@ -503,27 +417,25 @@
           audio: true,
         });
       } catch (audioErr) {
-        console.warn('[GOLBTELAS] Tentativa com áudio falhou, usando apenas vídeo:', audioErr);
         localStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
           audio: false,
         });
       }
     } catch (err) {
-      console.warn('[GOLBTELAS] Erro ao compartilhar tela:', err);
       if (err.name === 'NotAllowedError' || err.name === 'AbortError') return;
-      alert('Não foi possível iniciar o compartilhamento de tela: ' + (err.message || err.name));
+      alert('Não foi possível iniciar o compartilhamento: ' + (err.message || err.name));
       return;
     }
 
     isCameraActive = false;
+    isNativeCaptureActive = false;
     applyLocalStreamAndBroadcast();
   }
 
-  // Transmissão de Câmera (getUserMedia - Suporte a 100% dos celulares)
   async function startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      alert('Seu navegador não possui permissão para acessar a câmera.');
+      alert('Seu dispositivo não possui permissão para acessar a câmera.');
       return;
     }
 
@@ -533,14 +445,12 @@
         audio: true,
       });
     } catch (err) {
-      console.warn('[GOLBTELAS] Falha na câmera com áudio, tentando apenas vídeo:', err);
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: currentFacingMode },
           audio: false,
         });
       } catch (camErr) {
-        console.error('[GOLBTELAS] Permissão de câmera negada:', camErr);
         if (camErr.name === 'NotAllowedError' || camErr.name === 'AbortError') return;
         alert('Não foi possível acessar a câmera: ' + (camErr.message || camErr.name));
         return;
@@ -548,15 +458,14 @@
     }
 
     isCameraActive = true;
+    isNativeCaptureActive = false;
     applyLocalStreamAndBroadcast();
   }
 
-  // Virar Câmera (Frontal <-> Traseira)
   async function flipCamera() {
     if (!localStream || !isCameraActive) return;
 
     currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
-    console.log('[GOLBTELAS] Alternando câmera para:', currentFacingMode);
 
     let newStream = null;
     try {
@@ -565,15 +474,13 @@
         audio: true,
       });
     } catch (err) {
-      console.warn('[GOLBTELAS] Falha ao virar câmera com áudio, tentando apenas vídeo:', err);
       try {
         newStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: currentFacingMode } },
           audio: false,
         });
       } catch (err2) {
-        console.error('[GOLBTELAS] Não foi possível virar a câmera:', err2);
-        alert('Não foi possível alternar a câmera neste dispositivo.');
+        alert('Não foi possível alternar a câmera.');
         currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
         return;
       }
@@ -582,7 +489,6 @@
     const newVideoTrack = newStream.getVideoTracks()[0] || null;
     const newAudioTrack = newStream.getAudioTracks()[0] || null;
 
-    // Atualiza a faixa nos transceivers de todos os pares conectados
     peers.forEach((peer) => {
       if (peer.videoTransceiver && peer.videoTransceiver.sender && newVideoTrack) {
         peer.videoTransceiver.sender.replaceTrack(newVideoTrack).catch(() => {});
@@ -592,7 +498,6 @@
       }
     });
 
-    // Encerra as faixas anteriores e substitui
     localStream.getTracks().forEach((t) => t.stop());
     localStream = newStream;
 
@@ -605,23 +510,16 @@
     const videoTrack = localStream.getVideoTracks()[0] || null;
     const audioTrack = localStream.getAudioTracks()[0] || null;
 
-    console.log('[GOLBTELAS] Iniciando transmissão para os pares conectados:', peers.size);
-
     if (videoTrack) {
       videoTrack.addEventListener('ended', stopShare);
     }
 
-    peers.forEach((peer, peerId) => {
-      console.log(`[GOLBTELAS] Enviando faixas de mídia para ${peer.name} (${peerId})`);
+    peers.forEach((peer) => {
       if (peer.videoTransceiver && peer.videoTransceiver.sender) {
-        peer.videoTransceiver.sender.replaceTrack(videoTrack)
-          .then(() => console.log(`[GOLBTELAS] replaceTrack de vídeo OK para ${peer.name}`))
-          .catch((err) => console.error(`[GOLBTELAS] replaceTrack de vídeo FALHOU para ${peer.name}:`, err));
+        peer.videoTransceiver.sender.replaceTrack(videoTrack).catch(() => {});
       }
       if (peer.audioTransceiver && peer.audioTransceiver.sender) {
-        peer.audioTransceiver.sender.replaceTrack(audioTrack)
-          .then(() => console.log(`[GOLBTELAS] replaceTrack de áudio OK para ${peer.name}`))
-          .catch((err) => console.error(`[GOLBTELAS] replaceTrack de áudio FALHOU para ${peer.name}:`, err));
+        peer.audioTransceiver.sender.replaceTrack(audioTrack).catch(() => {});
       }
     });
 
@@ -647,7 +545,13 @@
 
   function stopShare() {
     if (!localStream) return;
-    console.log('[GOLBTELAS] Parando transmissão local');
+
+    if (isNativeCaptureActive && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScreenCapture) {
+      if (nativeFrameListener && nativeFrameListener.remove) nativeFrameListener.remove();
+      if (nativeStopListener && nativeStopListener.remove) nativeStopListener.remove();
+      window.Capacitor.Plugins.ScreenCapture.stopCapture().catch(() => {});
+      isNativeCaptureActive = false;
+    }
 
     peers.forEach((peer) => {
       if (peer.videoTransceiver && peer.videoTransceiver.sender) {
@@ -678,7 +582,59 @@
     renderParticipants();
   }
 
-  // Preview da sua própria transmissão
+  // ---------- Gestão de Layout: Grade vs Modo Foco / Destaque ----------
+  layoutGridBtn.addEventListener('click', () => setSpotlightMode(null));
+  layoutFocusBtn.addEventListener('click', () => {
+    // Escolhe o primeiro stream ativo como foco se não houver nenhum
+    const firstActive = Array.from(remoteTiles.keys())[0] || 'local';
+    setSpotlightMode(firstActive);
+  });
+
+  panelFullscreenBtn.addEventListener('click', () => toggleFullscreen(stagePanel));
+  stageFullscreenBtn.addEventListener('click', () => toggleFullscreen(document.documentElement));
+
+  function setSpotlightMode(peerId) {
+    currentSpotlightId = peerId;
+    layoutGridBtn.classList.toggle('active', !peerId);
+    layoutFocusBtn.classList.toggle('active', !!peerId);
+    reorganizeStageTiles();
+  }
+
+  function reorganizeStageTiles() {
+    stageGrid.classList.toggle('spotlight-mode', !!currentSpotlightId);
+
+    // Remove qualquer barra de miniaturas antiga
+    let strip = stageGrid.querySelector('.spotlight-strip');
+    if (strip) strip.remove();
+
+    if (!currentSpotlightId) {
+      // Modo Grade: todas as tiles voltam à grade normal
+      remoteTiles.forEach((tile) => {
+        tile.classList.remove('is-spotlight');
+        stageGrid.appendChild(tile);
+      });
+    } else {
+      // Modo Foco: tile em destaque no topo + barra de miniaturas embaixo
+      strip = document.createElement('div');
+      strip.className = 'spotlight-strip';
+
+      remoteTiles.forEach((tile, id) => {
+        if (id === currentSpotlightId) {
+          tile.classList.add('is-spotlight');
+          stageGrid.appendChild(tile);
+        } else {
+          tile.classList.remove('is-spotlight');
+          strip.appendChild(tile);
+        }
+      });
+
+      if (strip.children.length > 0) {
+        stageGrid.appendChild(strip);
+      }
+    }
+  }
+
+  // Render: Tile local
   function showLocalTile(stream) {
     let tile = remoteTiles.get('local');
     if (!tile) {
@@ -690,10 +646,29 @@
       const muteBtn = tile.querySelector('.mute-toggle');
       if (muteBtn) muteBtn.remove();
 
+      const focusBtn = tile.querySelector('.focus-toggle');
+      if (focusBtn) {
+        focusBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSpotlightMode(currentSpotlightId === 'local' ? null : 'local');
+        });
+      }
+
       const fsBtn = tile.querySelector('.fullscreen-toggle');
       if (fsBtn) {
-        fsBtn.addEventListener('click', () => toggleFullscreen(tile.querySelector('video') || tile));
+        fsBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleFullscreen(tile.querySelector('video') || tile);
+        });
       }
+
+      // Clique direto na tile alterna foco para ela
+      tile.addEventListener('click', () => {
+        if (currentSpotlightId !== 'local') setSpotlightMode('local');
+      });
+
+      // Duplo clique entra em tela cheia
+      tile.addEventListener('dblclick', () => toggleFullscreen(tile.querySelector('video') || tile));
 
       stageGrid.appendChild(tile);
       remoteTiles.set('local', tile);
@@ -713,9 +688,10 @@
     attemptPlay(video);
     updateStageEmptyState();
     updateLiveCount();
+    reorganizeStageTiles();
   }
 
-  // Render: grade de vídeo remoto
+  // Render: Tile remoto
   function showRemoteTile(peerId, stream) {
     let tile = remoteTiles.get(peerId);
     if (!tile) {
@@ -725,7 +701,8 @@
 
       const muteBtn = tile.querySelector('.mute-toggle');
       if (muteBtn) {
-        muteBtn.addEventListener('click', () => {
+        muteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const v = tile.querySelector('video');
           v.muted = !v.muted;
           muteBtn.textContent = v.muted ? '🔇' : '🔊';
@@ -734,10 +711,29 @@
         });
       }
 
+      const focusBtn = tile.querySelector('.focus-toggle');
+      if (focusBtn) {
+        focusBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSpotlightMode(currentSpotlightId === peerId ? null : peerId);
+        });
+      }
+
       const fsBtn = tile.querySelector('.fullscreen-toggle');
       if (fsBtn) {
-        fsBtn.addEventListener('click', () => toggleFullscreen(tile.querySelector('video') || tile));
+        fsBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleFullscreen(tile.querySelector('video') || tile);
+        });
       }
+
+      // Clique direto na tile alterna foco para ela
+      tile.addEventListener('click', () => {
+        if (currentSpotlightId !== peerId) setSpotlightMode(peerId);
+      });
+
+      // Duplo clique entra em tela cheia
+      tile.addEventListener('dblclick', () => toggleFullscreen(tile.querySelector('video') || tile));
 
       stageGrid.appendChild(tile);
       remoteTiles.set(peerId, tile);
@@ -759,19 +755,28 @@
     attemptPlay(video);
     updateStageEmptyState();
     updateLiveCount();
+    reorganizeStageTiles();
   }
 
   function toggleFullscreen(elem) {
     if (!elem) return;
     try {
-      if (elem.requestFullscreen) {
-        elem.requestFullscreen();
-      } else if (elem.webkitRequestFullscreen) {
-        elem.webkitRequestFullscreen();
-      } else if (elem.webkitEnterFullscreen) {
-        elem.webkitEnterFullscreen(); // Suporte ao Safari iOS
-      } else if (elem.msRequestFullscreen) {
-        elem.msRequestFullscreen();
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      } else {
+        if (elem.requestFullscreen) {
+          elem.requestFullscreen();
+        } else if (elem.webkitRequestFullscreen) {
+          elem.webkitRequestFullscreen();
+        } else if (elem.webkitEnterFullscreen) {
+          elem.webkitEnterFullscreen();
+        } else if (elem.msRequestFullscreen) {
+          elem.msRequestFullscreen();
+        }
       }
     } catch (err) {
       console.warn('[GOLBTELAS] Erro ao alternar tela cheia:', err);
@@ -797,14 +802,16 @@
     const tile = remoteTiles.get(peerId);
     if (tile) {
       const video = tile.querySelector('video');
-      if (video) {
-        video.srcObject = null;
-      }
+      if (video) video.srcObject = null;
       tile.remove();
       remoteTiles.delete(peerId);
     }
+    if (currentSpotlightId === peerId) {
+      currentSpotlightId = null;
+    }
     updateStageEmptyState();
     updateLiveCount();
+    reorganizeStageTiles();
   }
 
   function updateStageEmptyState() {
@@ -820,7 +827,6 @@
     liveCount.textContent = `${count} AO VIVO`;
   }
 
-  // Render: lista de participantes
   function renderParticipants() {
     participantList.innerHTML = '';
     const all = Array.from(participantsState.entries());
@@ -866,7 +872,6 @@
     updateLiveCount();
   }
 
-  // Copiar link da sala
   copyLinkBtn.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(roomLinkInput.value);

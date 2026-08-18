@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css" />
+<link rel="manifest" href="/manifest.json" />
 </head>
 <body>
 
@@ -16,7 +17,9 @@
     <span class="brand-dot" id="connDot"></span>
     <span class="brand-word">GOLBTELAS</span>
   </div>
-  <div class="topbar-right" id="topbarRight"></div>
+  <div class="topbar-right" id="topbarRight">
+    <button id="stageFullscreenBtn" class="btn-topbar" title="Tela Cheia Geral">⛶ Tela Cheia</button>
+  </div>
 </header>
 
 <!-- TELA 1: entrar na sala -->
@@ -36,10 +39,20 @@
 
 <!-- TELA 2: dentro da sala -->
 <main id="roomView" class="view room-view hidden">
-  <section class="stage-panel">
+  <section class="stage-panel" id="stagePanel">
     <div class="stage-head">
-      <h2>Transmissões <span class="live-count" id="liveCount">0 AO VIVO</span></h2>
+      <div class="stage-head-left">
+        <h2>Transmissões <span class="live-count" id="liveCount">0 AO VIVO</span></h2>
+      </div>
+      <div class="stage-head-right">
+        <div class="layout-toggle-group">
+          <button id="layoutGridBtn" class="btn-layout active" title="Visualização em Grade">🔲 Grade</button>
+          <button id="layoutFocusBtn" class="btn-layout" title="Visualização em Destaque">🔍 Foco</button>
+        </div>
+        <button id="panelFullscreenBtn" class="btn-layout" title="Tela Cheia">⛶ Expandir</button>
+      </div>
     </div>
+
     <div id="stageGrid" class="stage-grid">
       <div class="stage-empty" id="stageEmpty">
         <div class="empty-icon"></div>
@@ -49,7 +62,7 @@
     </div>
   </section>
 
-  <aside class="side-panel">
+  <aside class="side-panel" id="sidePanel">
     <div class="side-block">
       <p class="side-label">SUA TRANSMISSÃO</p>
       <div class="share-buttons-group">
@@ -58,7 +71,7 @@
         <button id="flipCameraBtn" class="btn-secondary hidden">🔄 Virar câmera (Traseira/Frontal)</button>
         <button id="stopShareBtn" class="btn-danger hidden">Parar transmissão</button>
       </div>
-      <p class="hint">Escolha uma tela ou use sua câmera. O áudio entra junto se o aparelho suportar.</p>
+      <p class="hint">Transmita a tela inteira, jogos ou câmera. No celular, deite o aparelho na horizontal para tela cheia!</p>
     </div>
 
     <div class="side-block">
@@ -84,6 +97,7 @@
       <span class="tile-name"></span>
     </div>
     <div class="video-tile-actions">
+      <button class="tile-btn focus-toggle" type="button" title="Destacar esta tela">🔍</button>
       <button class="tile-btn fullscreen-toggle" type="button" title="Tela cheia">⛶</button>
       <button class="tile-btn mute-toggle" type="button" title="Ativar áudio">🔇</button>
     </div>
