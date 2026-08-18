@@ -67,12 +67,19 @@
   const liveCount = document.getElementById('liveCount');
 
   const shareBtn = document.getElementById('shareBtn');
+  const cameraBtn = document.getElementById('cameraBtn');
   const stopShareBtn = document.getElementById('stopShareBtn');
   const participantList = document.getElementById('participantList');
   const participantCount = document.getElementById('participantCount');
   const roomLinkInput = document.getElementById('roomLinkInput');
   const copyLinkBtn = document.getElementById('copyLinkBtn');
   const videoTileTemplate = document.getElementById('videoTileTemplate');
+
+  // Modal elementos
+  const mobileModal = document.getElementById('mobileModal');
+  const modalCameraBtn = document.getElementById('modalCameraBtn');
+  const modalSafariBtn = document.getElementById('modalSafariBtn');
+  const modalCloseBtn = document.getElementById('modalCloseBtn');
 
   roomLinkInput.value = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
 
@@ -381,7 +388,7 @@
         peer.remoteStream.addTrack(e.track);
       }
 
-      // Só exibe a tile de vídeo remoto se o peer estiver compartilhando tela ou a track estiver ativa
+      // Só exibe a tile de vídeo remoto se o peer estiver compartilhando tela/câmera ou a track estiver ativa
       if (e.track.kind === 'video' && peer.isSharing) {
         showRemoteTile(peerId, peer.remoteStream);
       }
@@ -479,56 +486,108 @@
     removeRemoteTile(peerId);
   }
 
-  // ---------- compartilhar tela (com compatibilidade total para Mobile/Desktop) ----------
-  shareBtn.addEventListener('click', startShare);
+  // ---------- Iniciar Transmissão de Tela / Câmera ----------
+  shareBtn.addEventListener('click', handleShareClick);
+  cameraBtn.addEventListener('click', startCamera);
   stopShareBtn.addEventListener('click', stopShare);
 
-  async function startShare() {
-    // Validação de suporte no navegador
+  function handleShareClick() {
+    // Se o navegador não suportar getDisplayMedia (ex: Chrome no iPhone)
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      alert(
-        'Seu navegador não suporta compartilhamento de tela direto.\n\n' +
-        'Dica: Se você abriu pelo WhatsApp, Instagram ou Discord, toque nos três pontinhos e escolha "Abrir no Chrome" (Android) ou "Abrir no Safari" (iPhone).'
-      );
+      mobileModal.classList.remove('hidden');
       return;
     }
+    startScreenShare();
+  }
 
+  modalCloseBtn.addEventListener('click', () => {
+    mobileModal.classList.add('hidden');
+  });
+
+  modalCameraBtn.addEventListener('click', () => {
+    mobileModal.classList.add('hidden');
+    startCamera();
+  });
+
+  modalSafariBtn.addEventListener('click', async () => {
     try {
-      // 1. Tenta capturar tela com áudio (ideal para Desktop e navegadores que suportam)
+      await navigator.clipboard.writeText(roomLinkInput.value);
+      alert('Link copiado com sucesso! Abra o aplicativo Safari e cole o link para compartilhar sua tela.');
+    } catch {
+      alert('Copie o link da sala no topo e abra no Safari do iPhone.');
+    }
+    mobileModal.classList.add('hidden');
+  });
+
+  // Transmissão de Tela (getDisplayMedia)
+  async function startScreenShare() {
+    try {
       try {
         localStream = await navigator.mediaDevices.getDisplayMedia({
           video: { frameRate: 30 },
           audio: true,
         });
       } catch (audioErr) {
-        console.warn('[GOLBTELAS] Falha na captura com áudio, tentando apenas vídeo (fallback mobile):', audioErr);
-        // 2. Fallback: tenta capturar apenas o vídeo (compatível com navegadores mobile que não suportam áudio de sistema)
+        console.warn('[GOLBTELAS] Tentativa com áudio falhou, usando apenas vídeo:', audioErr);
         localStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
           audio: false,
         });
       }
     } catch (err) {
-      console.warn('[GOLBTELAS] Usuário cancelou ou permissão negada:', err);
-      if (err.name === 'NotAllowedError') {
-        // Usuário apenas cancelou a janela de seleção
-        return;
-      }
-      alert('Não foi possível iniciar a transmissão: ' + (err.message || err.name));
+      console.warn('[GOLBTELAS] Erro ao compartilhar tela:', err);
+      if (err.name === 'NotAllowedError') return;
+      alert('Não foi possível iniciar a transmissão de tela: ' + (err.message || err.name));
       return;
     }
+
+    applyLocalStreamAndBroadcast();
+  }
+
+  // Transmissão de Câmera (getUserMedia - 100% compatível com todos os celulares e navegadores)
+  async function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Seu navegador não possui permissão para acessar a câmera.');
+      return;
+    }
+
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: true,
+      });
+    } catch (err) {
+      console.warn('[GOLBTELAS] Falha na câmera com áudio, tentando apenas vídeo:', err);
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' },
+          audio: false,
+        });
+      } catch (camErr) {
+        console.error('[GOLBTELAS] Permissão de câmera negada:', camErr);
+        if (camErr.name === 'NotAllowedError') return;
+        alert('Não foi possível acessar a câmera: ' + (camErr.message || camErr.name));
+        return;
+      }
+    }
+
+    applyLocalStreamAndBroadcast();
+  }
+
+  function applyLocalStreamAndBroadcast() {
+    if (!localStream) return;
 
     const videoTrack = localStream.getVideoTracks()[0] || null;
     const audioTrack = localStream.getAudioTracks()[0] || null;
 
-    console.log('[GOLBTELAS] Iniciando transmissão de tela para os pares conectados:', peers.size);
+    console.log('[GOLBTELAS] Iniciando transmissão para os pares conectados:', peers.size);
 
     if (videoTrack) {
       videoTrack.addEventListener('ended', stopShare);
     }
 
     peers.forEach((peer, peerId) => {
-      console.log(`[GOLBTELAS] Enviando faixa de vídeo e áudio para ${peer.name} (${peerId})`);
+      console.log(`[GOLBTELAS] Enviando faixas de mídia para ${peer.name} (${peerId})`);
       if (peer.videoTransceiver && peer.videoTransceiver.sender) {
         peer.videoTransceiver.sender.replaceTrack(videoTrack)
           .then(() => console.log(`[GOLBTELAS] replaceTrack de vídeo OK para ${peer.name}`))
@@ -551,13 +610,14 @@
     showLocalTile(localStream);
 
     shareBtn.classList.add('hidden');
+    cameraBtn.classList.add('hidden');
     stopShareBtn.classList.remove('hidden');
     renderParticipants();
   }
 
   function stopShare() {
     if (!localStream) return;
-    console.log('[GOLBTELAS] Parando transmissão de tela local');
+    console.log('[GOLBTELAS] Parando transmissão local');
 
     peers.forEach((peer) => {
       if (peer.videoTransceiver && peer.videoTransceiver.sender) {
@@ -581,11 +641,12 @@
     removeRemoteTile('local');
 
     shareBtn.classList.remove('hidden');
+    cameraBtn.classList.remove('hidden');
     stopShareBtn.classList.add('hidden');
     renderParticipants();
   }
 
-  // Preview da sua própria tela compartilhada
+  // Preview da sua própria transmissão
   function showLocalTile(stream) {
     let tile = remoteTiles.get('local');
     if (!tile) {
@@ -676,12 +737,12 @@
       } else if (elem.webkitRequestFullscreen) {
         elem.webkitRequestFullscreen();
       } else if (elem.webkitEnterFullscreen) {
-        elem.webkitEnterFullscreen(); // Suporte nativo ao iPhone/Safari
+        elem.webkitEnterFullscreen(); // Suporte ao Safari iOS
       } else if (elem.msRequestFullscreen) {
         elem.msRequestFullscreen();
       }
     } catch (err) {
-      console.warn('[GOLBTELAS] Erro ao entrar em tela cheia:', err);
+      console.warn('[GOLBTELAS] Erro ao alternar tela cheia:', err);
     }
   }
 

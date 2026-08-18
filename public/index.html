@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Golbtelas — transmissão de tela</title>
+<title>Golbtelas — transmissão de tela e vídeo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -30,7 +30,7 @@
     <input id="nameInput" class="field" type="text" placeholder="Digite seu nome" maxlength="40" autocomplete="off" />
 
     <button id="joinBtn" class="btn-primary">Entrar</button>
-    <p class="hint">No celular ou PC: transmita sua tela, jogos e apps direto pelo navegador.</p>
+    <p class="hint">No PC ou celular: assista e transmita com seus amigos em tempo real.</p>
   </div>
 </main>
 
@@ -44,7 +44,7 @@
       <div class="stage-empty" id="stageEmpty">
         <div class="empty-icon"></div>
         <p class="empty-title">Aguardando a primeira transmissão</p>
-        <p class="empty-sub">Quando alguém compartilhar a tela, ela aparece aqui.</p>
+        <p class="empty-sub">Quando alguém compartilhar a tela ou câmera, ela aparece aqui.</p>
       </div>
     </div>
   </section>
@@ -52,9 +52,12 @@
   <aside class="side-panel">
     <div class="side-block">
       <p class="side-label">SUA TRANSMISSÃO</p>
-      <button id="shareBtn" class="btn-primary btn-share">Compartilhar tela</button>
-      <button id="stopShareBtn" class="btn-secondary hidden">Parar transmissão</button>
-      <p class="hint">Escolha uma tela, jogo ou app. O áudio entra junto se o dispositivo suportar.</p>
+      <div class="share-buttons-group">
+        <button id="shareBtn" class="btn-primary btn-share">🖥️ Compartilhar tela</button>
+        <button id="cameraBtn" class="btn-secondary btn-share">📷 Usar câmera</button>
+      </div>
+      <button id="stopShareBtn" class="btn-danger hidden">Parar transmissão</button>
+      <p class="hint" id="shareHint">No iPhone: abra no Safari para compartilhar a tela inteira.</p>
     </div>
 
     <div class="side-block">
@@ -71,6 +74,19 @@
     </div>
   </aside>
 </main>
+
+<!-- Modal amigável para opções no iPhone/Mobile -->
+<div id="mobileModal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <h3 id="modalTitle">Transmissão no iPhone / Celular</h3>
+    <p id="modalDesc">A Apple restringe a captura de tela ao navegador <b>Safari</b>. No Chrome do iPhone você pode transmitir pela câmera ou abrir no Safari.</p>
+    <div class="modal-actions">
+      <button id="modalCameraBtn" class="btn-primary">📷 Transmitir Câmera</button>
+      <button id="modalSafariBtn" class="btn-secondary">🧭 Copiar link para o Safari</button>
+      <button id="modalCloseBtn" class="btn-text">Cancelar</button>
+    </div>
+  </div>
+</div>
 
 <template id="videoTileTemplate">
   <div class="video-tile">
