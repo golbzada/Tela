@@ -35,6 +35,8 @@
   let selfName = '';
   let roomId = getRoomIdFromUrl();
   let localStream = null;
+  let isCameraActive = false;
+  let currentFacingMode = 'user'; // 'user' (frontal) ou 'environment' (traseira)
 
   // peerId -> {
   //   pc: RTCPeerConnection,
@@ -68,18 +70,13 @@
 
   const shareBtn = document.getElementById('shareBtn');
   const cameraBtn = document.getElementById('cameraBtn');
+  const flipCameraBtn = document.getElementById('flipCameraBtn');
   const stopShareBtn = document.getElementById('stopShareBtn');
   const participantList = document.getElementById('participantList');
   const participantCount = document.getElementById('participantCount');
   const roomLinkInput = document.getElementById('roomLinkInput');
   const copyLinkBtn = document.getElementById('copyLinkBtn');
   const videoTileTemplate = document.getElementById('videoTileTemplate');
-
-  // Modal elementos
-  const mobileModal = document.getElementById('mobileModal');
-  const modalCameraBtn = document.getElementById('modalCameraBtn');
-  const modalSafariBtn = document.getElementById('modalSafariBtn');
-  const modalCloseBtn = document.getElementById('modalCloseBtn');
 
   roomLinkInput.value = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
 
@@ -487,44 +484,22 @@
   }
 
   // ---------- Iniciar Transmissão de Tela / Câmera ----------
-  shareBtn.addEventListener('click', handleShareClick);
+  shareBtn.addEventListener('click', startScreenShare);
   cameraBtn.addEventListener('click', startCamera);
+  flipCameraBtn.addEventListener('click', flipCamera);
   stopShareBtn.addEventListener('click', stopShare);
 
-  function handleShareClick() {
-    // Se o navegador não suportar getDisplayMedia (ex: Chrome no iPhone)
+  // Transmissão de Tela (getDisplayMedia) - Dispara a seleção nativa do sistema
+  async function startScreenShare() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      mobileModal.classList.remove('hidden');
+      alert('O compartilhamento de tela não é suportado pelo seu navegador atual. No iPhone, use o Safari. No Android, use o Chrome.');
       return;
     }
-    startScreenShare();
-  }
 
-  modalCloseBtn.addEventListener('click', () => {
-    mobileModal.classList.add('hidden');
-  });
-
-  modalCameraBtn.addEventListener('click', () => {
-    mobileModal.classList.add('hidden');
-    startCamera();
-  });
-
-  modalSafariBtn.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(roomLinkInput.value);
-      alert('Link copiado com sucesso! Abra o aplicativo Safari e cole o link para compartilhar sua tela.');
-    } catch {
-      alert('Copie o link da sala no topo e abra no Safari do iPhone.');
-    }
-    mobileModal.classList.add('hidden');
-  });
-
-  // Transmissão de Tela (getDisplayMedia)
-  async function startScreenShare() {
     try {
       try {
         localStream = await navigator.mediaDevices.getDisplayMedia({
-          video: { frameRate: 30 },
+          video: true,
           audio: true,
         });
       } catch (audioErr) {
@@ -536,15 +511,16 @@
       }
     } catch (err) {
       console.warn('[GOLBTELAS] Erro ao compartilhar tela:', err);
-      if (err.name === 'NotAllowedError') return;
-      alert('Não foi possível iniciar a transmissão de tela: ' + (err.message || err.name));
+      if (err.name === 'NotAllowedError' || err.name === 'AbortError') return;
+      alert('Não foi possível iniciar o compartilhamento de tela: ' + (err.message || err.name));
       return;
     }
 
+    isCameraActive = false;
     applyLocalStreamAndBroadcast();
   }
 
-  // Transmissão de Câmera (getUserMedia - 100% compatível com todos os celulares e navegadores)
+  // Transmissão de Câmera (getUserMedia - Suporte a 100% dos celulares)
   async function startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       alert('Seu navegador não possui permissão para acessar a câmera.');
@@ -553,25 +529,74 @@
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: currentFacingMode },
         audio: true,
       });
     } catch (err) {
       console.warn('[GOLBTELAS] Falha na câmera com áudio, tentando apenas vídeo:', err);
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user' },
+          video: { facingMode: currentFacingMode },
           audio: false,
         });
       } catch (camErr) {
         console.error('[GOLBTELAS] Permissão de câmera negada:', camErr);
-        if (camErr.name === 'NotAllowedError') return;
+        if (camErr.name === 'NotAllowedError' || camErr.name === 'AbortError') return;
         alert('Não foi possível acessar a câmera: ' + (camErr.message || camErr.name));
         return;
       }
     }
 
+    isCameraActive = true;
     applyLocalStreamAndBroadcast();
+  }
+
+  // Virar Câmera (Frontal <-> Traseira)
+  async function flipCamera() {
+    if (!localStream || !isCameraActive) return;
+
+    currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+    console.log('[GOLBTELAS] Alternando câmera para:', currentFacingMode);
+
+    let newStream = null;
+    try {
+      newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: currentFacingMode } },
+        audio: true,
+      });
+    } catch (err) {
+      console.warn('[GOLBTELAS] Falha ao virar câmera com áudio, tentando apenas vídeo:', err);
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: currentFacingMode } },
+          audio: false,
+        });
+      } catch (err2) {
+        console.error('[GOLBTELAS] Não foi possível virar a câmera:', err2);
+        alert('Não foi possível alternar a câmera neste dispositivo.');
+        currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+        return;
+      }
+    }
+
+    const newVideoTrack = newStream.getVideoTracks()[0] || null;
+    const newAudioTrack = newStream.getAudioTracks()[0] || null;
+
+    // Atualiza a faixa nos transceivers de todos os pares conectados
+    peers.forEach((peer) => {
+      if (peer.videoTransceiver && peer.videoTransceiver.sender && newVideoTrack) {
+        peer.videoTransceiver.sender.replaceTrack(newVideoTrack).catch(() => {});
+      }
+      if (peer.audioTransceiver && peer.audioTransceiver.sender && newAudioTrack) {
+        peer.audioTransceiver.sender.replaceTrack(newAudioTrack).catch(() => {});
+      }
+    });
+
+    // Encerra as faixas anteriores e substitui
+    localStream.getTracks().forEach((t) => t.stop());
+    localStream = newStream;
+
+    showLocalTile(localStream);
   }
 
   function applyLocalStreamAndBroadcast() {
@@ -611,6 +636,11 @@
 
     shareBtn.classList.add('hidden');
     cameraBtn.classList.add('hidden');
+    if (isCameraActive) {
+      flipCameraBtn.classList.remove('hidden');
+    } else {
+      flipCameraBtn.classList.add('hidden');
+    }
     stopShareBtn.classList.remove('hidden');
     renderParticipants();
   }
@@ -630,6 +660,7 @@
 
     localStream.getTracks().forEach((t) => t.stop());
     localStream = null;
+    isCameraActive = false;
 
     if (socket && socket.connected) {
       socket.emit('share-state', { sharing: false });
@@ -642,6 +673,7 @@
 
     shareBtn.classList.remove('hidden');
     cameraBtn.classList.remove('hidden');
+    flipCameraBtn.classList.add('hidden');
     stopShareBtn.classList.add('hidden');
     renderParticipants();
   }

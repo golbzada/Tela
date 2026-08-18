@@ -30,7 +30,7 @@
     <input id="nameInput" class="field" type="text" placeholder="Digite seu nome" maxlength="40" autocomplete="off" />
 
     <button id="joinBtn" class="btn-primary">Entrar</button>
-    <p class="hint">No PC ou celular: assista e transmita com seus amigos em tempo real.</p>
+    <p class="hint">No PC ou celular: transmita sua tela, jogo ou câmera em tempo real.</p>
   </div>
 </main>
 
@@ -55,9 +55,10 @@
       <div class="share-buttons-group">
         <button id="shareBtn" class="btn-primary btn-share">🖥️ Compartilhar tela</button>
         <button id="cameraBtn" class="btn-secondary btn-share">📷 Usar câmera</button>
+        <button id="flipCameraBtn" class="btn-secondary hidden">🔄 Virar câmera (Traseira/Frontal)</button>
+        <button id="stopShareBtn" class="btn-danger hidden">Parar transmissão</button>
       </div>
-      <button id="stopShareBtn" class="btn-danger hidden">Parar transmissão</button>
-      <p class="hint" id="shareHint">No iPhone: abra no Safari para compartilhar a tela inteira.</p>
+      <p class="hint">Escolha uma tela ou use sua câmera. O áudio entra junto se o aparelho suportar.</p>
     </div>
 
     <div class="side-block">
@@ -74,19 +75,6 @@
     </div>
   </aside>
 </main>
-
-<!-- Modal amigável para opções no iPhone/Mobile -->
-<div id="mobileModal" class="modal-overlay hidden">
-  <div class="modal-card">
-    <h3 id="modalTitle">Transmissão no iPhone / Celular</h3>
-    <p id="modalDesc">A Apple restringe a captura de tela ao navegador <b>Safari</b>. No Chrome do iPhone você pode transmitir pela câmera ou abrir no Safari.</p>
-    <div class="modal-actions">
-      <button id="modalCameraBtn" class="btn-primary">📷 Transmitir Câmera</button>
-      <button id="modalSafariBtn" class="btn-secondary">🧭 Copiar link para o Safari</button>
-      <button id="modalCloseBtn" class="btn-text">Cancelar</button>
-    </div>
-  </div>
-</div>
 
 <template id="videoTileTemplate">
   <div class="video-tile">
