@@ -14,7 +14,6 @@
     ],
   };
 
-  // Carrega configuração de servidores STUN/TURN dinamicamente da API do servidor
   async function loadIceConfig() {
     try {
       const res = await fetch(`${SERVER_URL}/api/ice-servers`);
@@ -36,7 +35,7 @@
   let socket = null;
   let selfId = null;
   let selfName = '';
-  let roomId = getRoomIdFromUrl();
+  let roomId = 'sala-principal';
   let localStream = null;
   let isCameraActive = false;
   let isNativeCaptureActive = false;
@@ -53,6 +52,7 @@
   const joinView = document.getElementById('joinView');
   const roomView = document.getElementById('roomView');
   const nameInput = document.getElementById('nameInput');
+  const roomInput = document.getElementById('roomInput');
   const joinBtn = document.getElementById('joinBtn');
   const connDot = document.getElementById('connDot');
 
@@ -63,8 +63,6 @@
 
   const layoutGridBtn = document.getElementById('layoutGridBtn');
   const layoutFocusBtn = document.getElementById('layoutFocusBtn');
-  const panelFullscreenBtn = document.getElementById('panelFullscreenBtn');
-  const stageFullscreenBtn = document.getElementById('stageFullscreenBtn');
 
   const shareBtn = document.getElementById('shareBtn');
   const cameraBtn = document.getElementById('cameraBtn');
@@ -76,22 +74,26 @@
   const copyLinkBtn = document.getElementById('copyLinkBtn');
   const videoTileTemplate = document.getElementById('videoTileTemplate');
 
-  roomLinkInput.value = `https://tela-production-dff8.up.railway.app/?room=${roomId}`;
-
-  function getRoomIdFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    let r = params.get('room');
-    if (!r) {
-      r = 'sala-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    }
-    return r;
+  // Inicializa o campo de código da sala
+  const urlRoomParam = new URLSearchParams(window.location.search).get('room');
+  if (urlRoomParam) {
+    roomId = urlRoomParam;
   }
+  if (roomInput) {
+    roomInput.value = roomId;
+  }
+  roomLinkInput.value = `https://tela-production-dff8.up.railway.app/?room=${encodeURIComponent(roomId)}`;
 
   // ---------- entrar na sala ----------
   joinBtn.addEventListener('click', doJoin);
   nameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doJoin();
   });
+  if (roomInput) {
+    roomInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doJoin();
+    });
+  }
 
   async function doJoin() {
     const name = nameInput.value.trim();
@@ -99,9 +101,13 @@
       nameInput.focus();
       return;
     }
+    const enteredRoom = roomInput ? (roomInput.value.trim() || 'sala-principal') : 'sala-principal';
+    roomId = enteredRoom;
     selfName = name;
     joinBtn.disabled = true;
     joinBtn.textContent = 'Entrando...';
+
+    roomLinkInput.value = `https://tela-production-dff8.up.railway.app/?room=${encodeURIComponent(roomId)}`;
 
     await loadIceConfig();
     connectSocket();
@@ -114,7 +120,7 @@
     });
 
     socket.on('connect', () => {
-      console.log(`[GOLBTELAS] Conectado ao servidor (${socket.id})`);
+      console.log(`[GOLBTELAS] Conectado ao servidor (${socket.id}) na sala: ${roomId}`);
       connDot.style.background = '#3DDC84';
       socket.emit('join-room', { room: roomId, name: selfName });
     });
@@ -126,7 +132,7 @@
 
     socket.on('joined', ({ selfId: id, existingPeers }) => {
       selfId = id;
-      console.log(`[GOLBTELAS] Entrou na sala ${roomId} com ID ${selfId}. Peers existentes:`, existingPeers);
+      console.log(`[GOLBTELAS] Entrou na sala "${roomId}" com ID ${selfId}. Peers:`, existingPeers);
       participantsState.set(selfId, { name: selfName, isSharing: false });
       joinView.classList.add('hidden');
       roomView.classList.remove('hidden');
@@ -516,10 +522,14 @@
 
     peers.forEach((peer) => {
       if (peer.videoTransceiver && peer.videoTransceiver.sender) {
-        peer.videoTransceiver.sender.replaceTrack(videoTrack).catch(() => {});
+        peer.videoTransceiver.sender.replaceTrack(videoTrack)
+          .then(() => console.log(`[GOLBTELAS] replaceTrack de vídeo OK para ${peer.name}`))
+          .catch((err) => console.error(`[GOLBTELAS] replaceTrack de vídeo FALHOU para ${peer.name}:`, err));
       }
       if (peer.audioTransceiver && peer.audioTransceiver.sender) {
-        peer.audioTransceiver.sender.replaceTrack(audioTrack).catch(() => {});
+        peer.audioTransceiver.sender.replaceTrack(audioTrack)
+          .then(() => console.log(`[GOLBTELAS] replaceTrack de áudio OK para ${peer.name}`))
+          .catch((err) => console.error(`[GOLBTELAS] replaceTrack de áudio FALHOU para ${peer.name}:`, err));
       }
     });
 
@@ -585,13 +595,9 @@
   // ---------- Gestão de Layout: Grade vs Modo Foco / Destaque ----------
   layoutGridBtn.addEventListener('click', () => setSpotlightMode(null));
   layoutFocusBtn.addEventListener('click', () => {
-    // Escolhe o primeiro stream ativo como foco se não houver nenhum
     const firstActive = Array.from(remoteTiles.keys())[0] || 'local';
     setSpotlightMode(firstActive);
   });
-
-  panelFullscreenBtn.addEventListener('click', () => toggleFullscreen(stagePanel));
-  stageFullscreenBtn.addEventListener('click', () => toggleFullscreen(document.documentElement));
 
   function setSpotlightMode(peerId) {
     currentSpotlightId = peerId;
@@ -603,18 +609,15 @@
   function reorganizeStageTiles() {
     stageGrid.classList.toggle('spotlight-mode', !!currentSpotlightId);
 
-    // Remove qualquer barra de miniaturas antiga
     let strip = stageGrid.querySelector('.spotlight-strip');
     if (strip) strip.remove();
 
     if (!currentSpotlightId) {
-      // Modo Grade: todas as tiles voltam à grade normal
       remoteTiles.forEach((tile) => {
         tile.classList.remove('is-spotlight');
         stageGrid.appendChild(tile);
       });
     } else {
-      // Modo Foco: tile em destaque no topo + barra de miniaturas embaixo
       strip = document.createElement('div');
       strip.className = 'spotlight-strip';
 
@@ -634,7 +637,6 @@
     }
   }
 
-  // Render: Tile local
   function showLocalTile(stream) {
     let tile = remoteTiles.get('local');
     if (!tile) {
@@ -662,12 +664,10 @@
         });
       }
 
-      // Clique direto na tile alterna foco para ela
       tile.addEventListener('click', () => {
         if (currentSpotlightId !== 'local') setSpotlightMode('local');
       });
 
-      // Duplo clique entra em tela cheia
       tile.addEventListener('dblclick', () => toggleFullscreen(tile.querySelector('video') || tile));
 
       stageGrid.appendChild(tile);
@@ -691,7 +691,6 @@
     reorganizeStageTiles();
   }
 
-  // Render: Tile remoto
   function showRemoteTile(peerId, stream) {
     let tile = remoteTiles.get(peerId);
     if (!tile) {
@@ -727,12 +726,10 @@
         });
       }
 
-      // Clique direto na tile alterna foco para ela
       tile.addEventListener('click', () => {
         if (currentSpotlightId !== peerId) setSpotlightMode(peerId);
       });
 
-      // Duplo clique entra em tela cheia
       tile.addEventListener('dblclick', () => toggleFullscreen(tile.querySelector('video') || tile));
 
       stageGrid.appendChild(tile);

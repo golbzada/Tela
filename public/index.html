@@ -17,9 +17,7 @@
     <span class="brand-dot" id="connDot"></span>
     <span class="brand-word">GOLBTELAS</span>
   </div>
-  <div class="topbar-right" id="topbarRight">
-    <button id="stageFullscreenBtn" class="btn-topbar" title="Tela Cheia Geral">⛶ Tela Cheia</button>
-  </div>
+  <div class="topbar-right" id="topbarRight"></div>
 </header>
 
 <!-- TELA 1: entrar na sala -->
@@ -27,13 +25,16 @@
   <div class="join-card">
     <p class="eyebrow">Sala de transmissão</p>
     <h1>Entrar na sala</h1>
-    <p class="sub">Digite seu nome para continuar.</p>
+    <p class="sub">Digite seu nome e a sala para conectar com seus amigos.</p>
 
     <label class="field-label" for="nameInput">SEU NOME</label>
-    <input id="nameInput" class="field" type="text" placeholder="Digite seu nome" maxlength="40" autocomplete="off" />
+    <input id="nameInput" class="field" type="text" placeholder="Digite seu nome (Ex: Lucas)" maxlength="40" autocomplete="off" />
 
-    <button id="joinBtn" class="btn-primary">Entrar</button>
-    <p class="hint">No PC ou celular: transmita sua tela, jogo ou câmera em tempo real.</p>
+    <label class="field-label" for="roomInput">CÓDIGO DA SALA</label>
+    <input id="roomInput" class="field" type="text" placeholder="Ex: sala-principal" maxlength="40" autocomplete="off" />
+
+    <button id="joinBtn" class="btn-primary">Entrar na Sala</button>
+    <p class="hint">No PC e no Celular: use o mesmo código de sala para assistirem e transmitirem juntos!</p>
   </div>
 </main>
 
@@ -49,7 +50,6 @@
           <button id="layoutGridBtn" class="btn-layout active" title="Visualização em Grade">🔲 Grade</button>
           <button id="layoutFocusBtn" class="btn-layout" title="Visualização em Destaque">🔍 Foco</button>
         </div>
-        <button id="panelFullscreenBtn" class="btn-layout" title="Tela Cheia">⛶ Expandir</button>
       </div>
     </div>
 
@@ -104,7 +104,12 @@
   </div>
 </template>
 
-<script src="/socket.io/socket.io.js"></script>
+<script src="/socket.io.min.js"></script>
+<script>
+  if (typeof io === 'undefined') {
+    document.write('<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"><\/script>');
+  }
+</script>
 <script src="/app.js"></script>
 </body>
 </html>
