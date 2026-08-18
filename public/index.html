@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Golbtelas — transmissão de tela</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,7 +30,7 @@
     <input id="nameInput" class="field" type="text" placeholder="Digite seu nome" maxlength="40" autocomplete="off" />
 
     <button id="joinBtn" class="btn-primary">Entrar</button>
-    <p class="hint">A câmera não é usada — só compartilhamento de tela.</p>
+    <p class="hint">No celular ou PC: transmita sua tela, jogos e apps direto pelo navegador.</p>
   </div>
 </main>
 
@@ -54,7 +54,7 @@
       <p class="side-label">SUA TRANSMISSÃO</p>
       <button id="shareBtn" class="btn-primary btn-share">Compartilhar tela</button>
       <button id="stopShareBtn" class="btn-secondary hidden">Parar transmissão</button>
-      <p class="hint">Escolha uma tela, janela ou guia. O áudio entra junto se você marcar.</p>
+      <p class="hint">Escolha uma tela, jogo ou app. O áudio entra junto se o dispositivo suportar.</p>
     </div>
 
     <div class="side-block">
@@ -74,12 +74,15 @@
 
 <template id="videoTileTemplate">
   <div class="video-tile">
-    <video autoplay playsinline muted></video>
+    <video autoplay playsinline webkit-playsinline muted></video>
     <div class="video-tile-label">
       <span class="live-dot"></span>
       <span class="tile-name"></span>
     </div>
-    <button class="mute-toggle" type="button" title="Ativar áudio">🔇</button>
+    <div class="video-tile-actions">
+      <button class="tile-btn fullscreen-toggle" type="button" title="Tela cheia">⛶</button>
+      <button class="tile-btn mute-toggle" type="button" title="Ativar áudio">🔇</button>
+    </div>
   </div>
 </template>
 

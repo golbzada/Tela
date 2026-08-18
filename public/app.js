@@ -322,7 +322,7 @@
       const state = pc.iceConnectionState;
       console.log(`[GOLBTELAS][${name}] ICE Connection State: ${state}`);
       if (state === 'connected' || state === 'completed') {
-        peer.restartCount = 0; // Reseta contador de tentativas quando conectado com sucesso
+        peer.restartCount = 0;
       } else if (state === 'failed') {
         console.warn(`[GOLBTELAS][${name}] ICE Connection State entrou em FAILED.`);
         handleIceFailure(peerId, peer);
@@ -479,18 +479,42 @@
     removeRemoteTile(peerId);
   }
 
-  // ---------- compartilhar tela ----------
+  // ---------- compartilhar tela (com compatibilidade total para Mobile/Desktop) ----------
   shareBtn.addEventListener('click', startShare);
   stopShareBtn.addEventListener('click', stopShare);
 
   async function startShare() {
+    // Validação de suporte no navegador
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      alert(
+        'Seu navegador não suporta compartilhamento de tela direto.\n\n' +
+        'Dica: Se você abriu pelo WhatsApp, Instagram ou Discord, toque nos três pontinhos e escolha "Abrir no Chrome" (Android) ou "Abrir no Safari" (iPhone).'
+      );
+      return;
+    }
+
     try {
-      localStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 30 },
-        audio: true,
-      });
+      // 1. Tenta capturar tela com áudio (ideal para Desktop e navegadores que suportam)
+      try {
+        localStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 30 },
+          audio: true,
+        });
+      } catch (audioErr) {
+        console.warn('[GOLBTELAS] Falha na captura com áudio, tentando apenas vídeo (fallback mobile):', audioErr);
+        // 2. Fallback: tenta capturar apenas o vídeo (compatível com navegadores mobile que não suportam áudio de sistema)
+        localStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false,
+        });
+      }
     } catch (err) {
-      console.warn('[GOLBTELAS] Usuário cancelou ou permissão de tela negada:', err);
+      console.warn('[GOLBTELAS] Usuário cancelou ou permissão negada:', err);
+      if (err.name === 'NotAllowedError') {
+        // Usuário apenas cancelou a janela de seleção
+        return;
+      }
+      alert('Não foi possível iniciar a transmissão: ' + (err.message || err.name));
       return;
     }
 
@@ -569,8 +593,15 @@
       tile = frag.querySelector('.video-tile');
       tile.dataset.peerId = 'local';
       tile.classList.add('is-self');
+      
       const muteBtn = tile.querySelector('.mute-toggle');
       if (muteBtn) muteBtn.remove();
+
+      const fsBtn = tile.querySelector('.fullscreen-toggle');
+      if (fsBtn) {
+        fsBtn.addEventListener('click', () => toggleFullscreen(tile.querySelector('video') || tile));
+      }
+
       stageGrid.appendChild(tile);
       remoteTiles.set('local', tile);
     }
@@ -580,7 +611,7 @@
     video.playsInline = true;
     video.setAttribute('autoplay', '');
     video.setAttribute('playsinline', '');
-    video.setAttribute('webkit-playsinline', '');
+    video.setAttribute('webkit-playsinline', 'true');
 
     if (video.srcObject !== stream) {
       video.srcObject = stream;
@@ -598,6 +629,7 @@
       const frag = videoTileTemplate.content.cloneNode(true);
       tile = frag.querySelector('.video-tile');
       tile.dataset.peerId = peerId;
+
       const muteBtn = tile.querySelector('.mute-toggle');
       if (muteBtn) {
         muteBtn.addEventListener('click', () => {
@@ -608,6 +640,12 @@
           if (!v.muted) attemptPlay(v);
         });
       }
+
+      const fsBtn = tile.querySelector('.fullscreen-toggle');
+      if (fsBtn) {
+        fsBtn.addEventListener('click', () => toggleFullscreen(tile.querySelector('video') || tile));
+      }
+
       stageGrid.appendChild(tile);
       remoteTiles.set(peerId, tile);
     }
@@ -617,7 +655,7 @@
     video.playsInline = true;
     video.setAttribute('autoplay', '');
     video.setAttribute('playsinline', '');
-    video.setAttribute('webkit-playsinline', '');
+    video.setAttribute('webkit-playsinline', 'true');
 
     if (video.srcObject !== stream) {
       video.srcObject = stream;
@@ -630,8 +668,29 @@
     updateLiveCount();
   }
 
+  function toggleFullscreen(elem) {
+    if (!elem) return;
+    try {
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      } else if (elem.webkitEnterFullscreen) {
+        elem.webkitEnterFullscreen(); // Suporte nativo ao iPhone/Safari
+      } else if (elem.msRequestFullscreen) {
+        elem.msRequestFullscreen();
+      }
+    } catch (err) {
+      console.warn('[GOLBTELAS] Erro ao entrar em tela cheia:', err);
+    }
+  }
+
   function attemptPlay(video) {
     if (!video) return;
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', 'true');
+
     const p = video.play();
     if (p && typeof p.catch === 'function') {
       p.catch(() => {
