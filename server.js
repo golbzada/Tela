@@ -1,7 +1,29 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
 const { Server } = require('socket.io');
+
+// Carrega arquivo .env local se existir
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  try {
+    const envContent = fs.readFileSync(envPath, 'utf-8');
+    envContent.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+        const [key, ...values] = trimmed.split('=');
+        const k = key.trim();
+        const v = values.join('=').trim().replace(/^["'](.*)["']$/, '$1');
+        if (k && !process.env[k]) {
+          process.env[k] = v;
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('Não foi possível ler o arquivo .env:', e);
+  }
+}
 
 const app = express();
 app.set('trust proxy', 1);
@@ -52,6 +74,20 @@ function getIceServers() {
       }
       iceServers.push(turnConfig);
     }
+  } else {
+    // Fallback público com suporte a TURN (UDP e TCP) para garantir conexões em redes com CGNAT
+    iceServers.push(
+      {
+        urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443'],
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: ['turn:openrelay.metered.ca:443?transport=tcp'],
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      }
+    );
   }
 
   return iceServers;
@@ -153,5 +189,5 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`TelaJunto rodando em http://localhost:${PORT}`);
-  console.log('Servidores ICE configurados:', JSON.stringify(getIceServers(), null, 2));
+  console.log('Servidores ICE ativos:', JSON.stringify(getIceServers(), null, 2));
 });

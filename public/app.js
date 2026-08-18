@@ -5,6 +5,16 @@
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
+      {
+        urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443'],
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: ['turn:openrelay.metered.ca:443?transport=tcp'],
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
     ],
   };
 
@@ -40,6 +50,7 @@
   //   polite: boolean,
   //   makingOffer: boolean,
   //   ignoreOffer: boolean,
+  //   isSettingRemoteAnswerPending: boolean,
   //   iceCandidateQueue: Array,
   //   lastRestartTime: number,
   //   videoTransceiver: RTCRtpTransceiver,
@@ -172,9 +183,8 @@
           console.log(`[GOLBTELAS][${name}] Mensagem de sinalização recebida: SDP ${description.type}`);
 
           // Perfect Negotiation: detecção de colisão de ofertas
-          const offerCollision =
-            description.type === 'offer' &&
-            (peer.makingOffer || pc.signalingState !== 'stable');
+          const readyForOffer = !peer.makingOffer && (pc.signalingState === 'stable' || peer.isSettingRemoteAnswerPending);
+          const offerCollision = description.type === 'offer' && !readyForOffer;
 
           peer.ignoreOffer = !peer.polite && offerCollision;
           if (peer.ignoreOffer) {
@@ -182,8 +192,10 @@
             return;
           }
 
+          peer.isSettingRemoteAnswerPending = (description.type === 'answer');
           console.log(`[GOLBTELAS][${name}] Aplicando setRemoteDescription (${description.type})`);
           await pc.setRemoteDescription(new RTCSessionDescription(description));
+          peer.isSettingRemoteAnswerPending = false;
 
           // Esvazia e processa a fila de ICE candidates recebidos antes da remoteDescription
           if (peer.iceCandidateQueue.length > 0) {
@@ -253,6 +265,7 @@
       polite,
       makingOffer: false,
       ignoreOffer: false,
+      isSettingRemoteAnswerPending: false,
       iceCandidateQueue: [],
       lastRestartTime: 0,
       videoTransceiver,
