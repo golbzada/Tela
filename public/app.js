@@ -54,6 +54,23 @@
   const roomInput = document.getElementById('roomInput');
   const joinBtn = document.getElementById('joinBtn');
   const connDot = document.getElementById('connDot');
+  const connArc = document.getElementById('connArc');
+
+  function updateLogoStatus(connected) {
+    const color = connected ? '#3DDC84' : '#FF4444';
+    const filter = connected ? 'drop-shadow(0 0 6px rgba(61,220,132,0.85))' : 'drop-shadow(0 0 4px rgba(255,68,68,0.7))';
+    if (connDot) {
+      connDot.setAttribute('fill', color);
+      connDot.style.filter = filter;
+    }
+    if (connArc) {
+      connArc.setAttribute('fill', color);
+      connArc.style.filter = filter;
+    }
+  }
+
+  // Na tela de entrada inicial: vermelho!
+  updateLogoStatus(false);
 
   const stagePanel = document.getElementById('stagePanel');
   const stageGrid = document.getElementById('stageGrid');
@@ -117,13 +134,13 @@
 
     socket.on('connect', () => {
       console.log(`[GOLBTELAS] Conectado ao servidor (${socket.id}) na sala: ${roomId}`);
-      connDot.style.background = '#3DDC84';
+      updateLogoStatus(true);
       socket.emit('join-room', { room: roomId, name: selfName });
     });
 
     socket.on('disconnect', (reason) => {
       console.warn('[GOLBTELAS] Desconectado do servidor:', reason);
-      connDot.style.background = 'var(--live)';
+      updateLogoStatus(false);
     });
 
     socket.on('joined', ({ selfId: id, existingPeers }) => {
@@ -807,4 +824,39 @@
     peers.forEach((peer, peerId) => removePeer(peerId));
     if (socket) socket.emit('leave-room');
   });
+
+  // ---------- efeito 3D no card de entrada (segue o mouse) ----------
+  function initTilt() {
+    const wrapper = document.getElementById('tiltWrapper');
+    const card = document.getElementById('joinCard');
+    if (!wrapper || !card) return;
+
+    const MAX_TILT = 8; // graus
+
+    wrapper.addEventListener('mousemove', (e) => {
+      const rect = wrapper.getBoundingClientRect();
+      const x = e.clientX - rect.left - rect.width / 2;
+      const y = e.clientY - rect.top - rect.height / 2;
+      const rotateY = (x / (rect.width / 2)) * MAX_TILT;
+      const rotateX = -(y / (rect.height / 2)) * MAX_TILT;
+      card.style.transition = 'transform 0.05s linear';
+      card.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+    });
+
+    wrapper.addEventListener('mouseleave', () => {
+      card.style.transition = 'transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)';
+      card.style.transform = 'rotateX(0deg) rotateY(0deg)';
+    });
+
+    // toque no celular: um leve "pop" ao tocar, sem tilt (não faz sentido em touch)
+    wrapper.addEventListener('touchstart', () => {
+      card.style.transition = 'transform 0.2s ease';
+      card.style.transform = 'scale(0.98)';
+    }, { passive: true });
+    wrapper.addEventListener('touchend', () => {
+      card.style.transition = 'transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)';
+      card.style.transform = 'scale(1)';
+    }, { passive: true });
+  }
+  initTilt();
 })();

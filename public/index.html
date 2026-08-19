@@ -13,8 +13,19 @@
 <body>
 
 <header class="topbar">
-  <div class="brand">
-    <span class="brand-dot" id="connDot"></span>
+  <div class="brand" id="brandLogo">
+    <svg class="brand-svg-icon" viewBox="0 0 100 80" width="36" height="30" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Base dourada -->
+      <rect x="18" y="68" width="44" height="8" rx="4" fill="#E8B84B"/>
+      <!-- Haste suporte preta -->
+      <rect x="34" y="54" width="12" height="16" fill="#141720"/>
+      <!-- Tela do monitor -->
+      <rect x="4" y="6" width="72" height="50" rx="10" fill="#141720"/>
+      <!-- Círculo interno dinâmico (vermelho na entrada / verde conectado) -->
+      <circle id="connDot" cx="40" cy="31" r="13" fill="#FF4444"/>
+      <!-- Arco de transmissão lateral dinâmico -->
+      <path id="connArc" d="M 80,10 C 93,24 93,48 80,62 C 86,48 86,24 80,10 Z" fill="#FF4444"/>
+    </svg>
     <span class="brand-word">GOLBTELAS</span>
   </div>
   <div class="topbar-right" id="topbarRight"></div>
@@ -22,24 +33,48 @@
 
 <!-- TELA 1: entrar na sala -->
 <main id="joinView" class="view join-view">
-  <div class="join-card">
-    <p class="eyebrow">Sala de transmissão</p>
-    <h1>Entrar na sala</h1>
-    <p class="sub">Digite seu nome e a sala para conectar com seus amigos.</p>
+  <div class="bg-decor" aria-hidden="true">
+    <div class="bg-noise"></div>
+    <div class="bg-glow-top"></div>
+    <div class="bg-blob bg-blob-1"></div>
+    <div class="bg-blob bg-blob-2"></div>
+  </div>
 
-    <label class="field-label" for="nameInput">SEU NOME</label>
-    <input id="nameInput" class="field" type="text" placeholder="Digite seu nome (Ex: Lucas)" maxlength="40" autocomplete="off" />
+  <div class="tilt-wrapper" id="tiltWrapper">
+    <div class="join-card" id="joinCard">
+      <div class="card-border-glow"></div>
+      <div class="card-glass">
+        <p class="eyebrow">Sala de transmissão</p>
+        <h1>Entrar na sala</h1>
+        <p class="sub">Digite seu nome e a sala para conectar com seus amigos.</p>
 
-    <label class="field-label" for="roomInput">CÓDIGO DA SALA</label>
-    <input id="roomInput" class="field" type="text" placeholder="Ex: sala-principal" maxlength="40" autocomplete="off" />
+        <label class="field-label" for="nameInput">SEU NOME</label>
+        <input id="nameInput" class="field" type="text" placeholder="Digite seu nome (Ex: Lucas)" maxlength="40" autocomplete="off" />
 
-    <button id="joinBtn" class="btn-primary">Entrar na Sala</button>
-    <p class="hint">No PC e no Celular: use o mesmo código de sala para assistirem e transmitirem juntos!</p>
+        <label class="field-label" for="roomInput">CÓDIGO DA SALA</label>
+        <input id="roomInput" class="field" type="text" placeholder="Ex: sala-principal" maxlength="40" autocomplete="off" />
+
+        <button id="joinBtn" class="btn-primary">Entrar na Sala</button>
+        <p class="hint">No PC e no Celular: use o mesmo código de sala para assistirem e transmitirem juntos!</p>
+      </div>
+    </div>
   </div>
 </main>
 
 <!-- TELA 2: dentro da sala -->
 <main id="roomView" class="view room-view hidden">
+  <div class="room-bg" aria-hidden="true">
+    <div class="room-bg-base"></div>
+    <div class="room-bg-streaks">
+      <div class="room-streak room-streak-1"></div>
+      <div class="room-streak room-streak-2"></div>
+      <div class="room-streak room-streak-3"></div>
+      <div class="room-streak room-streak-4"></div>
+      <div class="room-streak room-streak-5"></div>
+    </div>
+    <div class="room-bg-dots"></div>
+  </div>
+
   <section class="stage-panel" id="stagePanel">
     <div class="stage-head">
       <div class="stage-head-left">
