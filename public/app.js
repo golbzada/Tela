@@ -588,7 +588,6 @@
     renderParticipants();
   }
 
-  // Render: Tile local
   function showLocalTile(stream) {
     let tile = remoteTiles.get('local');
     if (!tile) {
@@ -630,7 +629,6 @@
     updateLiveCount();
   }
 
-  // Render: Tile remoto
   function showRemoteTile(peerId, stream) {
     let tile = remoteTiles.get(peerId);
     if (!tile) {
