@@ -58,19 +58,6 @@ body {
   font-size: 18px;
 }
 
-.btn-topbar {
-  background: var(--panel-alt);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.btn-topbar:hover { border-color: var(--accent); }
-
 /* Views */
 .view { width: 100%; }
 .hidden { display: none !important; }
@@ -227,8 +214,6 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 .stage-head h2 {
   font-family: var(--font-display);
@@ -248,35 +233,6 @@ body {
   padding: 3px 9px;
 }
 
-.stage-head-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.layout-toggle-group {
-  display: flex;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 2px;
-}
-.btn-layout {
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.btn-layout.active {
-  background: var(--panel-alt);
-  color: var(--text);
-}
-.btn-layout:hover { color: var(--text); }
-
 /* Stage Grid */
 .stage-grid {
   display: grid;
@@ -286,37 +242,6 @@ body {
 }
 @media (max-width: 480px) {
   .stage-grid { grid-template-columns: 1fr; }
-}
-
-/* Modo Foco / Destaque (Spotlight) */
-.stage-grid.spotlight-mode {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.stage-grid.spotlight-mode .video-tile.is-spotlight {
-  flex: 1;
-  min-height: 400px;
-  max-height: 70vh;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
-}
-.stage-grid.spotlight-mode .spotlight-strip {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-}
-.stage-grid.spotlight-mode .spotlight-strip .video-tile {
-  width: 180px;
-  min-width: 180px;
-  height: 110px;
-  cursor: pointer;
-  transition: transform 0.15s ease, border-color 0.15s ease;
-}
-.stage-grid.spotlight-mode .spotlight-strip .video-tile:hover {
-  transform: translateY(-2px);
-  border-color: var(--accent);
 }
 
 .stage-empty {
@@ -360,7 +285,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  width: 100%;
 }
 .video-tile video {
   width: 100%;
@@ -401,14 +326,14 @@ body {
 }
 
 .tile-btn {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: rgba(14,16,22,0.85);
   color: var(--text);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -490,19 +415,23 @@ body {
 }
 
 /* Fullscreen Nativo (PC e Mobile) */
-:fullscreen .stage-panel,
-:-webkit-full-screen .stage-panel {
-  background: #000;
-  border: none;
-  border-radius: 0;
-  padding: 8px;
-  width: 100vw;
-  height: 100vh;
+:fullscreen,
+:-webkit-full-screen {
+  background: #000 !important;
 }
 :fullscreen .video-tile,
 :-webkit-full-screen .video-tile {
   border: none;
   border-radius: 0;
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: unset;
+}
+:fullscreen video,
+:-webkit-full-screen video {
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
 }
 
 /* Modo Horizontal no Celular (Landscape) */

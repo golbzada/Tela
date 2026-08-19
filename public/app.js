@@ -42,7 +42,6 @@
   let nativeFrameListener = null;
   let nativeStopListener = null;
   let currentFacingMode = 'user';
-  let currentSpotlightId = null; // null = Modo Grade; string (peerId ou 'local') = Modo Foco
 
   const peers = new Map();
   const remoteTiles = new Map(); // peerId -> tile element
@@ -60,9 +59,6 @@
   const stageGrid = document.getElementById('stageGrid');
   const stageEmpty = document.getElementById('stageEmpty');
   const liveCount = document.getElementById('liveCount');
-
-  const layoutGridBtn = document.getElementById('layoutGridBtn');
-  const layoutFocusBtn = document.getElementById('layoutFocusBtn');
 
   const shareBtn = document.getElementById('shareBtn');
   const cameraBtn = document.getElementById('cameraBtn');
@@ -592,51 +588,7 @@
     renderParticipants();
   }
 
-  // ---------- Gestão de Layout: Grade vs Modo Foco / Destaque ----------
-  layoutGridBtn.addEventListener('click', () => setSpotlightMode(null));
-  layoutFocusBtn.addEventListener('click', () => {
-    const firstActive = Array.from(remoteTiles.keys())[0] || 'local';
-    setSpotlightMode(firstActive);
-  });
-
-  function setSpotlightMode(peerId) {
-    currentSpotlightId = peerId;
-    layoutGridBtn.classList.toggle('active', !peerId);
-    layoutFocusBtn.classList.toggle('active', !!peerId);
-    reorganizeStageTiles();
-  }
-
-  function reorganizeStageTiles() {
-    stageGrid.classList.toggle('spotlight-mode', !!currentSpotlightId);
-
-    let strip = stageGrid.querySelector('.spotlight-strip');
-    if (strip) strip.remove();
-
-    if (!currentSpotlightId) {
-      remoteTiles.forEach((tile) => {
-        tile.classList.remove('is-spotlight');
-        stageGrid.appendChild(tile);
-      });
-    } else {
-      strip = document.createElement('div');
-      strip.className = 'spotlight-strip';
-
-      remoteTiles.forEach((tile, id) => {
-        if (id === currentSpotlightId) {
-          tile.classList.add('is-spotlight');
-          stageGrid.appendChild(tile);
-        } else {
-          tile.classList.remove('is-spotlight');
-          strip.appendChild(tile);
-        }
-      });
-
-      if (strip.children.length > 0) {
-        stageGrid.appendChild(strip);
-      }
-    }
-  }
-
+  // Render: Tile local
   function showLocalTile(stream) {
     let tile = remoteTiles.get('local');
     if (!tile) {
@@ -648,14 +600,6 @@
       const muteBtn = tile.querySelector('.mute-toggle');
       if (muteBtn) muteBtn.remove();
 
-      const focusBtn = tile.querySelector('.focus-toggle');
-      if (focusBtn) {
-        focusBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSpotlightMode(currentSpotlightId === 'local' ? null : 'local');
-        });
-      }
-
       const fsBtn = tile.querySelector('.fullscreen-toggle');
       if (fsBtn) {
         fsBtn.addEventListener('click', (e) => {
@@ -663,10 +607,6 @@
           toggleFullscreen(tile.querySelector('video') || tile);
         });
       }
-
-      tile.addEventListener('click', () => {
-        if (currentSpotlightId !== 'local') setSpotlightMode('local');
-      });
 
       tile.addEventListener('dblclick', () => toggleFullscreen(tile.querySelector('video') || tile));
 
@@ -688,9 +628,9 @@
     attemptPlay(video);
     updateStageEmptyState();
     updateLiveCount();
-    reorganizeStageTiles();
   }
 
+  // Render: Tile remoto
   function showRemoteTile(peerId, stream) {
     let tile = remoteTiles.get(peerId);
     if (!tile) {
@@ -710,14 +650,6 @@
         });
       }
 
-      const focusBtn = tile.querySelector('.focus-toggle');
-      if (focusBtn) {
-        focusBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          setSpotlightMode(currentSpotlightId === peerId ? null : peerId);
-        });
-      }
-
       const fsBtn = tile.querySelector('.fullscreen-toggle');
       if (fsBtn) {
         fsBtn.addEventListener('click', (e) => {
@@ -725,10 +657,6 @@
           toggleFullscreen(tile.querySelector('video') || tile);
         });
       }
-
-      tile.addEventListener('click', () => {
-        if (currentSpotlightId !== peerId) setSpotlightMode(peerId);
-      });
 
       tile.addEventListener('dblclick', () => toggleFullscreen(tile.querySelector('video') || tile));
 
@@ -752,7 +680,6 @@
     attemptPlay(video);
     updateStageEmptyState();
     updateLiveCount();
-    reorganizeStageTiles();
   }
 
   function toggleFullscreen(elem) {
@@ -803,12 +730,8 @@
       tile.remove();
       remoteTiles.delete(peerId);
     }
-    if (currentSpotlightId === peerId) {
-      currentSpotlightId = null;
-    }
     updateStageEmptyState();
     updateLiveCount();
-    reorganizeStageTiles();
   }
 
   function updateStageEmptyState() {
